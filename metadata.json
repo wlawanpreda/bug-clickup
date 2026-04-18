@@ -1,0 +1,8 @@
+{
+  "name": "bug-clickup",
+  "description": "An AI-powered system design assistant that analyzes images and prompts to generate structured project requirements and automatically creates ClickUp tasks.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

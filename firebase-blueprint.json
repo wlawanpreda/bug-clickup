@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "UserSettings": {
+      "title": "User Settings",
+      "description": "Stores user-specific ClickUp configuration and preferences",
+      "type": "object",
+      "properties": {
+        "clickUpToken": {
+          "type": "string",
+          "description": "ClickUp API Personal Token"
+        },
+        "teamId": {
+          "type": "string",
+          "description": "Selected ClickUp Team ID"
+        },
+        "spaceId": {
+          "type": "string",
+          "description": "Selected ClickUp Space ID"
+        },
+        "folderId": {
+          "type": "string",
+          "description": "Selected ClickUp Folder ID (optional)"
+        },
+        "listId": {
+          "type": "string",
+          "description": "Selected ClickUp List ID"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last time settings were updated"
+        }
+      },
+      "required": ["clickUpToken", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "UserSettings",
+      "description": "User specific settings identified by their Firebase Auth UID"
+    }
+  }
+}
