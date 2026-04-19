@@ -75,20 +75,12 @@ export const geminiService = {
       **ต้องตอบเนื้อหาทั้งหมดเป็นภาษาไทยเท่านั้น**
 
       **ภารกิจของคุณในการวิเคราะห์ครั้งนี้:**
-      1. **วิเคราะห์ระบบและฟีเจอร์:** จำแนกข้อมูลที่ได้รับให้อยู่ในระบบ (System) ดังต่อไปนี้เท่านั้น:
-         - business
-         - backoffice
-         - advertising funnel
-         - salehere
-         - other
-         และระบุชื่อ 'feature' สั้นๆ (เช่น login, report, ui-update)
-      2. **ความสำคัญและการประเมิน (AI Recommendation):**
-         - วิเคราะห์ความเร่งด่วน ('priorityLabel') และระดับเลข ('priorityLevel' : 1=Urgent, 2=High, 3=Normal, 4=Low)
-         - ประเมิน Story Points ('storyPoints' : เลือกจาก 1, 2, 3, 5, 8, 13)
-      3. **สรุปและแตก Task (Sub-tasks):** วิเคราะห์รายการที่ต้องทำแยกตามหมวดหมู่ (UI/UX, Backend, Logic) เพื่อให้เหมาะกับการนำไปสร้างเป็น Sub-tasks ได้ทันที
-      4. **สร้าง Acceptance Criteria (Gherkin Style):** สำหรับฟีเจอร์หรือปัญหาที่วิเคราะห์ ให้สร้างเงื่อนไขการยอมรับในรูปแบบ GIVEN / WHEN / THEN เพื่อให้ Developer และ QA นำไปใช้ต่อได้
-      5. **Definition of Done (DoD):** ระบุรายการตรวจสอบมาตรฐานเพื่อให้งานเสร็จสมบูรณ์ระดับมืออาชีพ
-      6. **เสนอแท็ก (Suggested Tags):** เสนอคำสำคัญที่เกี่ยวข้องเป็นภาษาอังกฤษสั้นๆ (เช่น UI, Backend, Logic, Fix, Feature, Improvement)
+      1. **วิเคราะห์ระบบและฟีเจอร์:** จำแนกข้อมูลที่ได้รับให้อยู่ในระบบ (System) [business, backoffice, advertising funnel, salehere, other] และระบุชื่อ 'feature' สั้นๆ
+      2. **การประเมินและการแตก Task (Dev Focus):**
+         - วิเคราะห์ความเร่งด่วน ('priorityLabel') และ Story Points ('storyPoints')
+         - แตกรายการงานแยกตามหมวดหมู่เทคนิค (UI/UX, Backend, Logic) ให้กระชับ เข้าใจง่าย
+      3. ** Acceptance Criteria & DoD:** สร้างเงื่อนไขการยอมรับ (GIVEN/WHEN/THEN) และรายการตรวจสอบมาตรฐาน (DoD) เป็นภาษาไทยที่ชัดเจน
+      4. **ลดเนื้อหาส่วนเกิน:** ไม่ต้องอธิบายยืดเยื้อ เน้นข้อมูลที่ Developer นำไปใช้งานได้ทันที
 
       **การส่งออกข้อมูล (Output Schema):**
       จงนำการวิเคราะห์ของคุณมาใส่ในรูปแบบ JSON ดังนี้:

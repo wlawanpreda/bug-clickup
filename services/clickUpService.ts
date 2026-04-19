@@ -3,9 +3,32 @@ import { Workspace, List, ClickUpTask, ClickUpStatus, ClickUpComment, ClickUpCus
 
 const BASE_URL = 'https://api.clickup.com/api/v2';
 
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+const fetchWithRetry = async (url: string, options: RequestInit, retries = 3, backoff = 1000): Promise<Response> => {
+  try {
+    const response = await fetch(url, options);
+    
+    if (response.status === 429 && retries > 0) {
+      const retryAfter = response.headers.get('Retry-After');
+      const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : backoff;
+      await delay(waitTime);
+      return fetchWithRetry(url, options, retries - 1, backoff * 2);
+    }
+    
+    return response;
+  } catch (err) {
+    if (retries > 0) {
+      await delay(backoff);
+      return fetchWithRetry(url, options, retries - 1, backoff * 2);
+    }
+    throw err;
+  }
+};
+
 export const clickUpService = {
   getWorkspaces: async (token: string): Promise<Workspace[]> => {
-    const response = await fetch(`${BASE_URL}/team`, {
+    const response = await fetchWithRetry(`${BASE_URL}/team`, {
       headers: { Authorization: token },
     });
     if (!response.ok) throw new Error('Failed to fetch workspaces');
@@ -14,25 +37,25 @@ export const clickUpService = {
   },
 
   getAllLists: async (token: string, teamId: string): Promise<List[]> => {
-    const spacesRes = await fetch(`${BASE_URL}/team/${teamId}/space`, {
+    const spacesRes = await fetchWithRetry(`${BASE_URL}/team/${teamId}/space`, {
       headers: { Authorization: token },
     });
     const spacesData = await spacesRes.json();
     const lists: List[] = [];
 
     for (const space of spacesData.spaces) {
-      const folderlessRes = await fetch(`${BASE_URL}/space/${space.id}/list`, {
+      const folderlessRes = await fetchWithRetry(`${BASE_URL}/space/${space.id}/list`, {
         headers: { Authorization: token },
       });
       const folderlessData = await folderlessRes.json();
       lists.push(...folderlessData.lists.map((l: any) => ({ id: l.id, name: `${space.name} > ${l.name}` })));
 
-      const foldersRes = await fetch(`${BASE_URL}/space/${space.id}/folder`, {
+      const foldersRes = await fetchWithRetry(`${BASE_URL}/space/${space.id}/folder`, {
         headers: { Authorization: token },
       });
       const foldersData = await foldersRes.json();
       for (const folder of foldersData.folders) {
-        const folderListsRes = await fetch(`${BASE_URL}/folder/${folder.id}/list`, {
+        const folderListsRes = await fetchWithRetry(`${BASE_URL}/folder/${folder.id}/list`, {
           headers: { Authorization: token },
         });
         const folderListsData = await folderListsRes.json();
@@ -43,7 +66,7 @@ export const clickUpService = {
   },
 
   getCustomFields: async (token: string, listId: string): Promise<ClickUpCustomField[]> => {
-    const response = await fetch(`${BASE_URL}/list/${listId}/field`, {
+    const response = await fetchWithRetry(`${BASE_URL}/list/${listId}/field`, {
       headers: { Authorization: token },
     });
     if (!response.ok) throw new Error('Failed to fetch custom fields');
@@ -52,7 +75,7 @@ export const clickUpService = {
   },
 
   setCustomFieldValue: async (token: string, taskId: string, fieldId: string, value: any) => {
-    const response = await fetch(`${BASE_URL}/task/${taskId}/field/${fieldId}`, {
+    const response = await fetchWithRetry(`${BASE_URL}/task/${taskId}/field/${fieldId}`, {
       method: 'POST',
       headers: {
         Authorization: token,
@@ -70,7 +93,7 @@ export const clickUpService = {
     let lastPageReached = false;
 
     while (!lastPageReached && page < 20) { 
-      const response = await fetch(`${BASE_URL}/list/${listId}/task?include_closed=true&page=${page}&limit=100`, {
+      const response = await fetchWithRetry(`${BASE_URL}/list/${listId}/task?include_closed=true&page=${page}&limit=100`, {
         headers: { Authorization: token },
       });
       if (!response.ok) throw new Error('Failed to fetch tasks');
@@ -91,7 +114,7 @@ export const clickUpService = {
   },
 
   getTaskDetails: async (token: string, taskId: string): Promise<ClickUpTask> => {
-    const response = await fetch(`${BASE_URL}/task/${taskId}?subtasks=true`, {
+    const response = await fetchWithRetry(`${BASE_URL}/task/${taskId}?subtasks=true`, {
       headers: { Authorization: token },
     });
     if (!response.ok) throw new Error('Failed to fetch task details');
@@ -103,13 +126,13 @@ export const clickUpService = {
     let before: string | null = null;
     let hasMore = true;
     let attempts = 0;
-    const MAX_ATTEMPTS = 20; // Fetch up to 2000 comments
+    const MAX_ATTEMPTS = 10; // Reduced from 20 to decrease load
     const REQUEST_LIMIT = 100;
 
     while (hasMore && attempts < MAX_ATTEMPTS) {
       attempts++;
       const url = `${BASE_URL}/task/${taskId}/comment?limit=${REQUEST_LIMIT}${before ? `&before=${before}` : ''}`;
-      const response = await fetch(url, {
+      const response = await fetchWithRetry(url, {
         headers: { Authorization: token },
       });
       
@@ -123,16 +146,12 @@ export const clickUpService = {
         const oldestComment = fetched[fetched.length - 1];
         before = oldestComment.date;
 
-        // In ClickUp, if we get fewer than we asked for, we've likely reached the end.
-        // However, some configurations might ignore limit=100 and return default 25.
-        // So we only stop if fetched.length is small (e.g., < 25).
         if (fetched.length >= 25) {
           hasMore = true;
         } else {
           hasMore = false;
         }
         
-        // Safety: If the last date hasn't changed, stop to avoid infinite loop
         if (attempts > 1 && allComments.length > fetched.length && allComments[allComments.length - fetched.length - 1].date === before) {
             hasMore = false;
         }
@@ -141,17 +160,15 @@ export const clickUpService = {
       }
     }
     
-    // Remove duplicates by ID
     const uniqueMap = new Map<string, ClickUpComment>();
     allComments.forEach(c => uniqueMap.set(c.id, c));
     const uniqueList = Array.from(uniqueMap.values());
 
-    // Sort by date descending (newest first)
     return uniqueList.sort((a, b) => parseInt(b.date) - parseInt(a.date));
   },
 
   addTaskComment: async (token: string, taskId: string, text: string) => {
-    const response = await fetch(`${BASE_URL}/task/${taskId}/comment`, {
+    const response = await fetchWithRetry(`${BASE_URL}/task/${taskId}/comment`, {
       method: 'POST',
       headers: {
         Authorization: token,
@@ -164,7 +181,7 @@ export const clickUpService = {
   },
 
   addReaction: async (token: string, commentId: string, reaction: string) => {
-    const response = await fetch(`${BASE_URL}/comment/${commentId}/reaction`, {
+    const response = await fetchWithRetry(`${BASE_URL}/comment/${commentId}/reaction`, {
       method: 'POST',
       headers: {
         Authorization: token,
@@ -183,7 +200,7 @@ export const clickUpService = {
   },
 
   getListStatuses: async (token: string, listId: string): Promise<ClickUpStatus[]> => {
-    const response = await fetch(`${BASE_URL}/list/${listId}`, {
+    const response = await fetchWithRetry(`${BASE_URL}/list/${listId}`, {
       headers: { Authorization: token },
     });
     if (!response.ok) throw new Error('Failed to fetch list details');
@@ -192,7 +209,7 @@ export const clickUpService = {
   },
 
   updateTask: async (token: string, taskId: string, data: { status?: string, name?: string, description?: string, markdown_description?: string, assignees?: number[] }) => {
-    const response = await fetch(`${BASE_URL}/task/${taskId}`, {
+    const response = await fetchWithRetry(`${BASE_URL}/task/${taskId}`, {
       method: 'PUT',
       headers: {
         Authorization: token,
@@ -205,7 +222,7 @@ export const clickUpService = {
   },
 
   createTask: async (token: string, listId: string, title: string, markdownDescription: string, priority?: number) => {
-    const response = await fetch(`${BASE_URL}/list/${listId}/task`, {
+    const response = await fetchWithRetry(`${BASE_URL}/list/${listId}/task`, {
       method: 'POST',
       headers: {
         Authorization: token,
@@ -224,14 +241,14 @@ export const clickUpService = {
 
   createSubtask: async (token: string, parentTaskId: string, title: string, markdownDescription: string, priority?: number) => {
     // We need to find the listId of the parent task first
-    const parentResponse = await fetch(`${BASE_URL}/task/${parentTaskId}`, {
+    const parentResponse = await fetchWithRetry(`${BASE_URL}/task/${parentTaskId}`, {
       headers: { Authorization: token },
     });
     if (!parentResponse.ok) throw new Error('Failed to fetch parent task details');
     const parentData = await parentResponse.json();
     const listId = parentData.list.id;
 
-    const response = await fetch(`${BASE_URL}/list/${listId}/task`, {
+    const response = await fetchWithRetry(`${BASE_URL}/list/${listId}/task`, {
       method: 'POST',
       headers: {
         Authorization: token,
@@ -250,7 +267,7 @@ export const clickUpService = {
   },
 
   deleteTask: async (token: string, taskId: string) => {
-    const response = await fetch(`${BASE_URL}/task/${taskId}`, {
+    const response = await fetchWithRetry(`${BASE_URL}/task/${taskId}`, {
       method: 'DELETE',
       headers: { Authorization: token },
     });
@@ -259,7 +276,7 @@ export const clickUpService = {
   },
 
   getListMembers: async (token: string, listId: string) => {
-    const response = await fetch(`${BASE_URL}/list/${listId}/member`, {
+    const response = await fetchWithRetry(`${BASE_URL}/list/${listId}/member`, {
       headers: { Authorization: token },
     });
     if (!response.ok) throw new Error('Failed to fetch list members');
@@ -280,7 +297,7 @@ export const clickUpService = {
     const formData = new FormData();
     formData.append('attachment', blob, `Preview-Bug-Report-${Date.now()}.png`);
 
-    const response = await fetch(`${BASE_URL}/task/${taskId}/attachment`, {
+    const response = await fetchWithRetry(`${BASE_URL}/task/${taskId}/attachment`, {
       method: 'POST',
       headers: {
         Authorization: token,

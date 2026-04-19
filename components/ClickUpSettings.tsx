@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { clickUpService } from '../services/clickUpService';
-import { ClickUpConfig, Workspace, List } from '../types';
+import { ClickUpConfig, Workspace, List, RecentBoard } from '../types';
 
 interface Props {
   onConfigSaved: (config: ClickUpConfig) => void;

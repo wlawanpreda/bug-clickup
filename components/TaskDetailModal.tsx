@@ -788,7 +788,7 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
                       </div>
                       {Object.keys(reactionGroups).length > 0 && (
                         <div className="flex flex-wrap gap-2 pl-11 mt-3">
-                          {Object.entries(reactionGroups).map(([reaction, data]) => (
+                          {(Object.entries(reactionGroups) as [string, { count: number, users: { id: number, username: string }[] }][]).map(([reaction, data]) => (
                             <button 
                               key={reaction} 
                               onClick={() => handleAddReaction(c.id, reaction)} 

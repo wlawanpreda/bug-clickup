@@ -7,12 +7,14 @@ interface Props {
   analysis: SystemAnalysis;
   config: ClickUpConfig;
   images: string[];
+  purpose: string;
+  notifyRoom: string;
   onQuestionAnswered: (answer: string) => void;
   onReset: () => void;
   onTaskCreated: () => void;
 }
 
-const AnalysisDisplay: React.FC<Props> = ({ analysis, config, images, onQuestionAnswered, onReset, onTaskCreated }) => {
+const AnalysisDisplay: React.FC<Props> = ({ analysis, config, images, purpose, notifyRoom, onQuestionAnswered, onReset, onTaskCreated }) => {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [userAnswer, setUserAnswer] = useState('');
@@ -66,23 +68,33 @@ const AnalysisDisplay: React.FC<Props> = ({ analysis, config, images, onQuestion
     setSending(true);
     try {
       const markdown = `
-# ${finalTitle}
+**📌 วัตถุประสงค์ (Purpose):**
+${purpose || 'ไม่ได้ระบุ'}
 
-## 💡 AI Recommendations
-- **Priority:** ${analysis.priorityLabel}
+**📍 แจ้งเตือนห้อง (Notify):**
+${notifyRoom || 'ไม่ได้ระบุ'}
+
+---
+
+### 💡 รายละเอียดและตรรกะทางธุรกิจ (Business Logic)
+${analysis.categories.map(c => `**[${c.name}]**\n${c.details.map(d => `- ${d}`).join('\n')}`).join('\n\n')}
+
+### 📋 เกณฑ์การยอมรับ (Acceptance Criteria)
+${analysis.acceptanceCriteria.map((ac, i) => `**Scenario ${i+1}:**
+- **GIVEN:** ${ac.given}
+- **WHEN:** ${ac.when}
+- **THEN:** ${ac.then}`).join('\n\n')}
+
+### ✅ Definition of Done (DoD)
+${analysis.definitionOfDone.map(d => `- [ ] ${d}`).join('\n')}
+
+---
+
+### 📊 ข้อมูลการประเมิน
+- **ลำดับความสำคัญ:** ${analysis.priorityLabel}
 - **Story Points:** ${analysis.storyPoints}
-
-## 📋 เกณฑ์การยอมรับ (Acceptance Criteria)
-${analysis.acceptanceCriteria.map((ac, i) => `### Scenario ${i+1}\n- **GIVEN:** ${ac.given}\n- **WHEN:** ${ac.when}\n- **THEN:** ${ac.then}`).join('\n\n')}
-
-## 🛠 รายการงานแนะนำ (Suggested Tasks)
-${analysis.categories.map(c => `### ${c.name}\n${c.details.map(d => `- ${d}`).join('\n')}`).join('\n\n')}
-
-## ✅ Definition of Done (DoD)
-${analysis.definitionOfDone.map(d => `- [] ${d}`).join('\n')}
-
-## 📊 โครงร่างสำหรับการนำเสนอ
-${analysis.keynoteSlides.map(s => `### ${s.title}\n${s.content.map(c => `- ${c}`).join('\n')}`).join('\n\n')}
+- **ระบบที่เกี่ยวข้อง:** ${formatSystem(editableSystem)}
+- **ฟีเจอร์:** ${editableFeature}
       `;
 
       const task = await clickUpService.createTask(config.apiToken, config.listId, finalTitle, markdown, analysis.priorityLevel);

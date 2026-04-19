@@ -270,9 +270,13 @@ const BoardView: React.FC<Props> = ({ config, refreshTrigger }) => {
         });
         setTaskStats(initialStats);
 
-        taskData.forEach(t => {
-          fetchTaskStats(t.id);
-        });
+        // Batch fetch stats to avoid rate limiting and browser connection limits
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < taskData.length; i += BATCH_SIZE) {
+          const batch = taskData.slice(i, i + BATCH_SIZE);
+          await Promise.all(batch.map(t => fetchTaskStats(t.id)));
+          // Small delay between batches if needed, but fetchWithRetry already handles 429s
+        }
 
       } catch (err) {
         setError('ไม่สามารถโหลดข้อมูลบอร์ดได้');

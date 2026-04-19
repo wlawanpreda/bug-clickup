@@ -15,6 +15,8 @@ const App: React.FC = () => {
   const [isEditingConfig, setIsEditingConfig] = useState(false);
   const [analysis, setAnalysis] = useState<SystemAnalysis | null>(null);
   const [prompt, setPrompt] = useState('');
+  const [notifyRoom, setNotifyRoom] = useState('');
+  const [purpose, setPurpose] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,8 +90,13 @@ const App: React.FC = () => {
   };
 
   const runAnalysis = async (customPrompt?: string) => {
-    const finalPrompt = customPrompt || prompt;
-    if (!finalPrompt && images.length === 0) return;
+    const finalPrompt = customPrompt || `
+วัตถุประสงค์ (เพื่อ): ${purpose}
+ห้องที่ต้องแจ้ง (เเจ้งห้อง): ${notifyRoom}
+รายละเอียด/โจทย์: ${prompt}
+    `.trim();
+    
+    if (!prompt && images.length === 0 && !purpose) return;
 
     setLoading(true);
     setError(null);
@@ -113,6 +120,8 @@ const App: React.FC = () => {
   const handleReset = () => {
     setAnalysis(null);
     setPrompt('');
+    setNotifyRoom('');
+    setPurpose('');
     setImages([]);
     setViewMode('board');
   };
@@ -237,11 +246,11 @@ const App: React.FC = () => {
             </button>
             <div className="w-px h-4 bg-gray-200 mx-1"></div>
             <button 
-              onClick={handleLogout}
-              className="text-[10px] font-black text-red-500 hover:text-red-700 uppercase tracking-wider transition"
-            >
-              Logout
-            </button>
+               onClick={handleLogout}
+               className="text-[10px] font-black text-red-500 hover:text-red-700 uppercase tracking-wider transition"
+             >
+               Logout
+             </button>
           </div>
         </div>
       </header>
@@ -249,12 +258,12 @@ const App: React.FC = () => {
       <main className="flex-1 overflow-hidden flex flex-col max-w-[1600px] mx-auto w-full px-6 py-8">
         {viewMode === 'board' ? (
           <div className="flex flex-col h-full space-y-6">
-            <div className="flex justify-between items-end">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div>
-                <h2 className="text-3xl font-black text-gray-900 tracking-tight">Project Board</h2>
-                <div className="flex items-center gap-3 mt-1">
-                  <p className="text-sm font-bold text-gray-500 uppercase tracking-widest text-[10px]">Board Switcher:</p>
-                  <div className="flex gap-2">
+                <h2 className="text-4xl font-black text-gray-900 tracking-tight leading-none mb-2">Project Board</h2>
+                <div className="flex items-center gap-3">
+                  <p className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em]">Board Context:</p>
+                  <div className="flex flex-wrap gap-2">
                     {config?.recentBoards?.map((rb) => (
                       <div 
                         key={rb.listId}
@@ -262,134 +271,222 @@ const App: React.FC = () => {
                       >
                         <button 
                           onClick={() => handleConfigSaved({...config, listId: rb.listId, workspaceId: rb.workspaceId, recentBoards: config.recentBoards})}
-                          className={`px-3 py-1 rounded-full text-[10px] font-black uppercase transition border-2 ${config.listId === rb.listId ? 'bg-indigo-700 border-indigo-700 text-white' : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-400'}`}
+                          className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all duration-200 border-2 ${config.listId === rb.listId ? 'bg-indigo-700 border-indigo-700 text-white shadow-lg shadow-indigo-200' : 'bg-white border-gray-100 text-gray-400 hover:border-indigo-400 hover:text-indigo-600'}`}
                         >
                           {rb.name.split(' > ').pop()}
                         </button>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const updated = config.recentBoards?.filter(r => r.listId !== rb.listId);
-                            handleConfigSaved({...config, recentBoards: updated});
-                          }}
-                          className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition shadow-sm"
-                        >
-                          <svg className="w-2 h-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                        </button>
+                        {config.listId !== rb.listId && (
+                           <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const updated = config.recentBoards?.filter(r => r.listId !== rb.listId);
+                              handleConfigSaved({...config, recentBoards: updated});
+                            }}
+                            className="absolute -top-1 -right-1 bg-white border border-gray-100 text-gray-400 hover:text-red-500 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition shadow-sm z-10"
+                          >
+                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                          </button>
+                        )}
                       </div>
                     ))}
                     <button 
                       onClick={() => setIsEditingConfig(true)}
-                      className="w-6 h-6 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-indigo-400 hover:text-indigo-400 transition"
+                      className="w-8 h-8 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300 hover:border-indigo-400 hover:text-indigo-400 hover:bg-indigo-50 transition-all duration-200"
                     >
-                      <span className="text-xs">＋</span>
+                      <span className="text-lg">＋</span>
                     </button>
                   </div>
                 </div>
               </div>
               <button 
                 onClick={() => setViewMode('analysis')}
-                className="bg-indigo-700 hover:bg-indigo-800 text-white px-6 py-3 rounded-2xl font-black text-sm shadow-lg shadow-indigo-100 flex items-center gap-2 transition transform active:scale-95"
+                className="bg-indigo-700 hover:bg-indigo-800 text-white px-8 py-4 rounded-2xl font-black text-sm shadow-xl shadow-indigo-100 flex items-center gap-3 transition-all duration-300 transform hover:-translate-y-1 active:translate-y-0 active:scale-95 group"
               >
-                <span>🤖</span> ใช้ AI ช่วยจัดการงาน
+                <span className="text-xl group-hover:rotate-12 transition-transform">🤖</span> 
+                <span>ใช้ AI ช่วยจัดการงาน</span>
               </button>
             </div>
             
-            <BoardView config={config} refreshTrigger={boardRefreshKey} />
+            <div className="bg-white rounded-[2rem] border border-gray-100 shadow-2xl shadow-indigo-50/50 p-1 flex-1 overflow-hidden min-h-[600px]">
+               <BoardView config={config} refreshTrigger={boardRefreshKey} />
+            </div>
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto w-full">
+          <div className="max-w-5xl mx-auto w-full pb-20">
             {!analysis ? (
-              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="text-center space-y-4">
-                  <h2 className="text-4xl font-black text-gray-900 leading-tight">
-                    PM's Sidekick AI <br/> 
-                    <span className="text-indigo-700">ผู้ช่วยวิเคราะห์และแตก Task งาน</span>
+              <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700 ease-out">
+                <div className="text-center space-y-6">
+                  <div className="inline-flex items-center gap-2 bg-indigo-50 px-4 py-2 rounded-full border border-indigo-100 mb-2">
+                     <span className="w-2 h-2 bg-indigo-600 rounded-full animate-pulse"></span>
+                     <span className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">AI Sidekick Analysis Mode</span>
+                  </div>
+                  <h2 className="text-5xl font-black text-gray-900 leading-[1.1] tracking-tight">
+                    เปลี่ยนไอเดียให้เป็น <br/>
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-700 via-purple-700 to-indigo-600">แผนงานระดับมืออาชีพ</span>
                   </h2>
-                  <p className="text-gray-700 text-lg font-medium max-w-xl mx-auto">
-                    สรุปบันทึกการประชุม, รายงานความคืบหน้า หรือร่างแผนงานจากข้อความและรูปภาพของคุณ
+                  <p className="text-gray-500 text-xl font-medium max-w-2xl mx-auto leading-relaxed">
+                    เพียงอัปโหลดภาพ หรือระบุสิ่งที่ต้องการ AI จะช่วยวิเคราะห์ สรุป <br className="hidden md:block"/> และแตกย่อยเป็น Task พร้อมทีมไปทำงานต่อได้ทันที
                   </p>
                 </div>
 
-                <div className="bg-white p-8 rounded-3xl shadow-xl border border-gray-200 space-y-6 text-left">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-black text-gray-900 mb-2 uppercase tracking-wide">1. อัปโหลดข้อมูลภาพ</label>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* Left Column: Visual Inputs */}
+                  <div className="lg:col-span-1 space-y-6">
+                    <div className="bg-white p-6 rounded-[2rem] shadow-xl border border-gray-100/50 hover:shadow-2xl transition-shadow duration-500">
+                      <label className="flex items-center gap-2 text-[11px] font-black text-indigo-600 mb-4 uppercase tracking-[0.15em]">
+                         <span className="w-5 h-5 bg-indigo-700 text-white rounded-md flex items-center justify-center text-[9px]">1</span>
+                         อัปโหลดข้อมูลภาพ
+                      </label>
                       <div 
                         onDrop={handleDrop}
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
-                        className={`border-2 border-dashed rounded-2xl p-4 flex flex-col items-center justify-center transition h-56 relative overflow-hidden ${
-                          isDragging ? 'border-indigo-600 bg-indigo-50 shadow-inner' : 'border-gray-300 bg-gray-50'
+                        className={`border-3 border-dashed rounded-[1.5rem] p-4 flex flex-col items-center justify-center transition-all duration-300 h-64 relative overflow-hidden ${
+                          isDragging ? 'border-indigo-600 bg-indigo-50/50 scale-[1.02] shadow-inner' : 'border-gray-100 bg-gray-50/50 hover:border-indigo-200'
                         }`}
                       >
                         {images.length === 0 ? (
                           <div 
                             onClick={() => fileInputRef.current?.click()}
-                            className="flex flex-col items-center justify-center cursor-pointer w-full h-full"
+                            className="flex flex-col items-center justify-center cursor-pointer w-full h-full group"
                           >
-                            <svg className={`w-12 h-12 mb-2 transition-colors ${isDragging ? 'text-indigo-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                            <p className="text-xs font-bold text-gray-500">ลากวาง หรือคลิกเพื่ออัปโหลด Screenshot</p>
-                            <p className="text-[9px] font-bold text-gray-400 mt-1 uppercase">รองรับหลายภาพพร้อมกัน</p>
+                            <div className="w-16 h-16 bg-white rounded-2xl shadow-sm border border-gray-100 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                               <svg className={`w-8 h-8 transition-colors ${isDragging ? 'text-indigo-600' : 'text-gray-300 group-hover:text-indigo-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            </div>
+                            <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest text-center px-4">ลากวางรูปภาพ หรือคลิกที่นี่</p>
                           </div>
                         ) : (
-                          <div className="w-full h-full flex flex-col">
-                             <div className="flex-1 overflow-y-auto scrollbar-hide">
-                                <div className="grid grid-cols-3 gap-2 p-1">
+                          <div className="w-full h-full flex flex-col pt-2">
+                             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                                <div className="grid grid-cols-2 gap-3 pb-4">
                                   {images.map((img, idx) => (
-                                    <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border-2 border-indigo-200 bg-white group shadow-sm">
+                                    <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border-2 border-white bg-white group shadow-md transform hover:rotate-1 transition-all">
                                       <img src={img} className="w-full h-full object-cover" alt={`Preview ${idx}`} />
-                                      <button 
-                                        onClick={() => removeImage(idx)}
-                                        className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded-lg opacity-0 group-hover:opacity-100 transition shadow-lg"
-                                      >
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                                      </button>
+                                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                         <button 
+                                          onClick={() => removeImage(idx)}
+                                          className="bg-red-500 text-white p-2 rounded-xl shadow-xl transform scale-75 group-hover:scale-100 transition-transform"
+                                        >
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                        </button>
+                                      </div>
                                     </div>
                                   ))}
                                   <div 
                                     onClick={() => fileInputRef.current?.click()}
-                                    className="aspect-square border-2 border-dashed border-indigo-300 rounded-xl flex items-center justify-center cursor-pointer hover:bg-indigo-100/50 transition bg-white"
+                                    className="aspect-square border-2 border-dashed border-indigo-200 rounded-2xl flex items-center justify-center cursor-pointer hover:bg-indigo-50/50 transition-all bg-white group"
                                   >
-                                    <span className="text-xl text-indigo-400">＋</span>
+                                    <span className="text-2xl text-indigo-300 group-hover:scale-125 transition-transform">＋</span>
                                   </div>
                                 </div>
                              </div>
-                             <button onClick={() => setImages([])} className="mt-2 text-[10px] font-black text-red-500 hover:text-red-700 uppercase self-end">ล้างรูปภาพทั้งหมด</button>
+                             <div className="pt-3 border-t border-gray-100 flex justify-between items-center bg-gray-50/50 -mx-4 -mb-4 p-3 px-4">
+                                <span className="text-[10px] font-black text-gray-400">{images.length} ไฟล์ที่เลือก</span>
+                                <button onClick={() => setImages([])} className="text-[10px] font-black text-red-500 hover:bg-red-50 px-2 py-1 rounded-lg transition-colors uppercase">ล้างทั้งหมด</button>
+                             </div>
                           </div>
                         )}
                       </div>
                       <input ref={fileInputRef} type="file" className="hidden" accept="image/*" multiple onChange={handleImageUpload} />
                     </div>
+                  </div>
 
-                    <div>
-                      <label className="block text-sm font-black text-gray-900 mb-2 uppercase tracking-wide">2. ระบุรายละเอียด/โจทย์</label>
-                      <textarea
-                        value={prompt}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        placeholder="เช่น 'สรุปงานจากแชทนี้' หรือ 'ร่าง Task จาก Diagram'..."
-                        className="w-full h-56 bg-gray-50 border-2 border-gray-200 rounded-2xl p-4 text-sm font-bold text-black focus:ring-4 focus:ring-indigo-100 focus:border-indigo-700 outline-none transition placeholder-gray-400"
-                      />
+                  {/* Right Column: Detailed Context */}
+                  <div className="lg:col-span-2 space-y-6">
+                    <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-gray-100/50 flex flex-col h-full">
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                          <div className="space-y-2">
+                             <label className="flex items-center gap-2 text-[11px] font-black text-indigo-600 uppercase tracking-[0.15em]">
+                                <span className="w-5 h-5 bg-indigo-700 text-white rounded-md flex items-center justify-center text-[9px]">2</span>
+                                เพื่อ (วัตถุประสงค์)
+                             </label>
+                             <input 
+                                type="text"
+                                value={purpose}
+                                onChange={(e) => setPurpose(e.target.value)}
+                                placeholder="เช่น เพื่อเสนอผู้บริหาร, เพื่อสรุปความคืบหน้า..."
+                                className="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl p-4 text-sm font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-700 outline-none transition-all placeholder-gray-300 shadow-sm"
+                             />
+                          </div>
+                          <div className="space-y-2">
+                             <label className="flex items-center gap-2 text-[11px] font-black text-indigo-600 uppercase tracking-[0.15em]">
+                                <span className="w-5 h-5 bg-indigo-700 text-white rounded-md flex items-center justify-center text-[9px]">3</span>
+                                เเจ้งห้อง
+                             </label>
+                             <input 
+                                type="text"
+                                value={notifyRoom}
+                                onChange={(e) => setNotifyRoom(e.target.value)}
+                                placeholder="เลือกห้องที่จะส่งการแจ้งเตือน..."
+                                className="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl p-4 text-sm font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-700 outline-none transition-all placeholder-gray-300 shadow-sm"
+                             />
+                          </div>
+                       </div>
+
+                       <div className="flex-1 space-y-2 flex flex-col">
+                          <label className="flex items-center gap-2 text-[11px] font-black text-indigo-600 uppercase tracking-[0.15em]">
+                             <span className="w-5 h-5 bg-indigo-700 text-white rounded-md flex items-center justify-center text-[9px]">4</span>
+                             ระบุรายละเอียด/โจทย์
+                          </label>
+                          <textarea
+                            value={prompt}
+                            onChange={(e) => setPrompt(e.target.value)}
+                            placeholder="เช่น 'สรุปงานจากภาพถ่ายแชทนี้และแตกเป็น Task ย่อยให้หน่อย โดยอ้างอิงจากประวัติการคุย'..."
+                            className="flex-1 min-h-[250px] w-full bg-gray-50 border-2 border-gray-100 rounded-[1.5rem] p-5 text-base font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-700 outline-none transition-all placeholder-gray-300 shadow-sm resize-none"
+                          />
+                       </div>
+
+                       {error && (
+                         <div className="mt-4 flex items-center gap-3 bg-red-50 p-4 rounded-2xl border border-red-100 text-red-600 animate-in zoom-in duration-300">
+                           <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd"></path></svg>
+                           <p className="text-sm font-black">{error}</p>
+                         </div>
+                       )}
+
+                       <div className="flex flex-col sm:flex-row gap-4 mt-8">
+                        <button
+                          onClick={() => setViewMode('board')}
+                          className="px-8 py-4 rounded-2xl font-black text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition-all active:scale-95 text-sm uppercase tracking-widest"
+                        >
+                          กลับไปที่บอร์ด
+                        </button>
+                        <button
+                          onClick={() => runAnalysis()}
+                          disabled={loading || (!prompt && images.length === 0 && !purpose)}
+                          className={`flex-1 py-5 rounded-[1.5rem] font-black text-xl text-white transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center gap-4 shadow-2xl ${loading ? 'bg-indigo-300 cursor-not-allowed opacity-70' : 'bg-indigo-700 hover:bg-indigo-800 shadow-indigo-200 hover:-translate-y-1'}`}
+                        >
+                          {loading ? (
+                            <div className="flex items-center gap-3">
+                               <div className="w-5 h-5 border-3 border-white/30 border-t-white rounded-full animate-spin"></div>
+                               <span className="text-base uppercase tracking-[0.2em]">กำลังวิเคราะห์ข้อมูล...</span>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="text-2xl animate-bounce">🤖</span> 
+                              <span>เริ่มวิเคราะห์และแตก Task</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
+                </div>
 
-                  {error && <p className="text-red-700 text-sm font-bold bg-red-50 p-3 rounded-lg border border-red-200">{error}</p>}
-
-                  <div className="flex gap-4">
-                    <button
-                      onClick={() => setViewMode('board')}
-                      className="px-6 py-4 rounded-2xl font-bold text-gray-500 hover:bg-gray-100 transition"
-                    >
-                      กลับไปที่บอร์ด
-                    </button>
-                    <button
-                      onClick={() => runAnalysis()}
-                      disabled={loading || (!prompt && images.length === 0)}
-                      className={`flex-1 py-4 rounded-2xl font-black text-xl text-white transition transform active:scale-[0.98] flex items-center justify-center gap-3 shadow-lg ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-700 hover:bg-indigo-800 shadow-indigo-200'}`}
-                    >
-                      <span>🤖</span> วิเคราะห์ข้อมูลงาน
-                    </button>
-                  </div>
+                <div className="flex items-center justify-center gap-6 pt-10">
+                   <div className="flex flex-col items-center">
+                      <div className="w-10 h-10 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mb-2">📋</div>
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Smart Summary</span>
+                   </div>
+                   <div className="w-12 h-px bg-gray-100"></div>
+                   <div className="flex flex-col items-center">
+                      <div className="w-10 h-10 rounded-full bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600 mb-2">⚡</div>
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Auto Breakdowns</span>
+                   </div>
+                   <div className="w-12 h-px bg-gray-100"></div>
+                   <div className="flex flex-col items-center">
+                      <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 mb-2">✨</div>
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Acceptance Criteria</span>
+                   </div>
                 </div>
               </div>
             ) : (
@@ -397,6 +494,8 @@ const App: React.FC = () => {
                 analysis={analysis} 
                 config={config} 
                 images={images}
+                purpose={purpose}
+                notifyRoom={notifyRoom}
                 onQuestionAnswered={handleQuestionAnswered}
                 onReset={handleReset}
                 onTaskCreated={handleTaskCreated}

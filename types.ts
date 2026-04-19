@@ -89,6 +89,10 @@ export interface ClickUpTask {
   subtasks?: ClickUpTask[];
   date_created?: string;
   date_updated?: string;
+  list?: {
+    id: string;
+    name: string;
+  };
 }
 
 export interface AcceptanceCriterion {
