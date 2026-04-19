@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { auth, getUserSettings } from '../services/firebase';
 import { ClickUpConfig } from '../types';
@@ -19,7 +19,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [userSettings, setUserSettings] = useState<ClickUpConfig | null>(null);
 
-  const fetchSettings = async (uid: string) => {
+  const fetchSettings = useCallback(async (uid: string) => {
     try {
       const settings = await getUserSettings(uid);
       if (settings) {
@@ -30,7 +30,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error) {
       console.error("Error fetching user settings", error);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -44,16 +44,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [fetchSettings]);
 
-  const refreshSettings = async () => {
+  const refreshSettings = useCallback(async () => {
     if (user) {
       await fetchSettings(user.uid);
     }
-  };
+  }, [user, fetchSettings]);
+
+  const value = useMemo(() => ({
+    user,
+    loading,
+    userSettings,
+    setUserSettings,
+    refreshSettings
+  }), [user, loading, userSettings, refreshSettings]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, userSettings, setUserSettings, refreshSettings }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

@@ -20,6 +20,7 @@ const ClickUpSettings: React.FC<Props> = ({ onConfigSaved, onCancel, initialConf
   const [listSearch, setListSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [autoSaved, setAutoSaved] = useState(false);
+  const [recentBoards, setRecentBoards] = useState<RecentBoard[]>(initialConfig?.recentBoards || []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastSavedRef = useRef<string>('');
@@ -44,9 +45,16 @@ const ClickUpSettings: React.FC<Props> = ({ onConfigSaved, onCancel, initialConf
   useEffect(() => {
     if (initialConfig?.apiToken) {
       fetchWorkspaces(initialConfig.apiToken);
-      lastSavedRef.current = JSON.stringify(initialConfig);
+      // Only set lastSavedRef on the very first load or if explicitly changed from outside
+      if (!lastSavedRef.current) {
+        lastSavedRef.current = JSON.stringify({
+          apiToken: initialConfig.apiToken,
+          workspaceId: initialConfig.workspaceId,
+          listId: initialConfig.listId
+        });
+      }
     }
-  }, [initialConfig, fetchWorkspaces]);
+  }, [initialConfig?.apiToken, fetchWorkspaces]); // Depend ONLY on token to prevent loops from workspace/list changes
 
   // Load List when Workspace changes
   useEffect(() => {
@@ -70,22 +78,68 @@ const ClickUpSettings: React.FC<Props> = ({ onConfigSaved, onCancel, initialConf
   // Auto-save logic
   useEffect(() => {
     if (token && selectedWorkspace && selectedList) {
-      const currentConfig = {
+      const configObj = {
         apiToken: token,
         workspaceId: selectedWorkspace,
-        listId: selectedList,
+        listId: selectedList
       };
-      const configStr = JSON.stringify(currentConfig);
+      const configStr = JSON.stringify(configObj);
       
       if (configStr !== lastSavedRef.current) {
+        // Find the name of the selected list
+        const listName = lists.find(l => l.id === selectedList)?.name || 
+                         recentBoards.find(rb => rb.listId === selectedList)?.name || 
+                         'Unknown Board';
+
+        const existingRecentIndex = recentBoards.findIndex(rb => rb.listId === selectedList);
+        let updatedRecent = [...recentBoards];
+
+        const newEntry: RecentBoard = {
+          listId: selectedList,
+          workspaceId: selectedWorkspace,
+          name: listName,
+          lastUsed: new Date().toISOString()
+        };
+
+        if (existingRecentIndex > -1) {
+          updatedRecent.splice(existingRecentIndex, 1);
+        }
+        updatedRecent.unshift(newEntry);
+        updatedRecent = updatedRecent.slice(0, 5); // Keep last 5
+
+        const currentConfig: ClickUpConfig = {
+          ...configObj,
+          recentBoards: updatedRecent
+        };
+        
         onConfigSaved(currentConfig);
+        setRecentBoards(updatedRecent);
         lastSavedRef.current = configStr;
         setAutoSaved(true);
         const timer = setTimeout(() => setAutoSaved(false), 3000);
         return () => clearTimeout(timer);
       }
     }
-  }, [token, selectedWorkspace, selectedList, onConfigSaved]);
+  }, [token, selectedWorkspace, selectedList, onConfigSaved, lists, recentBoards]);
+
+  const handleRemoveRecent = (e: React.MouseEvent, listId: string) => {
+    e.stopPropagation();
+    const updated = recentBoards.filter(rb => rb.listId !== listId);
+    setRecentBoards(updated);
+    
+    const currentConfig: ClickUpConfig = {
+      apiToken: token,
+      workspaceId: selectedWorkspace,
+      listId: selectedList,
+      recentBoards: updated
+    };
+    onConfigSaved(currentConfig);
+  };
+
+  const handleSelectRecent = (rb: RecentBoard) => {
+    setSelectedWorkspace(rb.workspaceId);
+    setSelectedList(rb.listId);
+  };
 
   const handleExportJSON = () => {
     const configData = {
@@ -203,6 +257,35 @@ const ClickUpSettings: React.FC<Props> = ({ onConfigSaved, onCancel, initialConf
             </button>
           </div>
         </div>
+
+        {recentBoards.length > 0 && (
+          <div className="space-y-2">
+            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest">ใช้บอร์ดที่เพิ่งเปิดอีกล่าสุด</label>
+            <div className="flex flex-wrap gap-2">
+              {recentBoards.map((rb) => (
+                <div 
+                  key={rb.listId}
+                  onClick={() => handleSelectRecent(rb)}
+                  className={`group flex items-center gap-2 px-3 py-1.5 rounded-full border-2 transition cursor-pointer text-xs font-bold ${
+                    selectedList === rb.listId 
+                      ? 'bg-indigo-600 border-indigo-600 text-white' 
+                      : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-400'
+                  }`}
+                >
+                  <span className="max-w-[120px] truncate">{rb.name.split(' > ').pop()}</span>
+                  <button 
+                    onClick={(e) => handleRemoveRecent(e, rb.listId)}
+                    className={`p-0.5 rounded-full hover:bg-red-500 hover:text-white transition ${
+                      selectedList === rb.listId ? 'text-indigo-200' : 'text-gray-300'
+                    }`}
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {workspaces.length > 0 && (
           <div className="animate-in fade-in slide-in-from-top-2">

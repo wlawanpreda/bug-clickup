@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ClickUpConfig, SystemAnalysis } from './types';
 import ClickUpSettings from './components/ClickUpSettings';
 import AnalysisDisplay from './components/AnalysisDisplay';
@@ -31,7 +31,7 @@ const App: React.FC = () => {
     }
   }, [userSettings]);
 
-  const handleConfigSaved = async (newConfig: ClickUpConfig) => {
+  const handleConfigSaved = useCallback(async (newConfig: ClickUpConfig) => {
     setConfig(newConfig);
     if (user) {
       try {
@@ -41,11 +41,11 @@ const App: React.FC = () => {
         console.error("Error saving settings to Firestore", err);
       }
     }
-  };
+  }, [user, setUserSettings]);
 
-  const closeSettings = () => {
+  const closeSettings = useCallback(() => {
     setIsEditingConfig(false);
-  };
+  }, []);
 
   const processFiles = (files: FileList | null) => {
     if (!files) return;
@@ -252,7 +252,40 @@ const App: React.FC = () => {
             <div className="flex justify-between items-end">
               <div>
                 <h2 className="text-3xl font-black text-gray-900 tracking-tight">Project Board</h2>
-                <p className="text-sm font-bold text-gray-500 mt-1">รายการงานทั้งหมดในบอร์ด ClickUp</p>
+                <div className="flex items-center gap-3 mt-1">
+                  <p className="text-sm font-bold text-gray-500 uppercase tracking-widest text-[10px]">Board Switcher:</p>
+                  <div className="flex gap-2">
+                    {config?.recentBoards?.map((rb) => (
+                      <div 
+                        key={rb.listId}
+                        className="group relative flex items-center"
+                      >
+                        <button 
+                          onClick={() => handleConfigSaved({...config, listId: rb.listId, workspaceId: rb.workspaceId, recentBoards: config.recentBoards})}
+                          className={`px-3 py-1 rounded-full text-[10px] font-black uppercase transition border-2 ${config.listId === rb.listId ? 'bg-indigo-700 border-indigo-700 text-white' : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-400'}`}
+                        >
+                          {rb.name.split(' > ').pop()}
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const updated = config.recentBoards?.filter(r => r.listId !== rb.listId);
+                            handleConfigSaved({...config, recentBoards: updated});
+                          }}
+                          className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition shadow-sm"
+                        >
+                          <svg className="w-2 h-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                      </div>
+                    ))}
+                    <button 
+                      onClick={() => setIsEditingConfig(true)}
+                      className="w-6 h-6 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-indigo-400 hover:text-indigo-400 transition"
+                    >
+                      <span className="text-xs">＋</span>
+                    </button>
+                  </div>
+                </div>
               </div>
               <button 
                 onClick={() => setViewMode('analysis')}

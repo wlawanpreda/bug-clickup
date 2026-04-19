@@ -10,11 +10,11 @@ interface Props {
   onClose: () => void;
 }
 
-type CommentFilter = 'all' | 'dev-todo' | 'tester-todo' | 'bug' | 'assigned' | 'resolved' | 'tested';
+type CommentFilter = 'all' | 'waiting-assign' | 'dev-fixing' | 'waiting-test' | 'tested';
 
-// ใช้ Shortcode ของ Emoji เพื่อให้ API ของ ClickUp ยอมรับ (เลิกใช้ Unicode Character ตรงๆ ในฟิลด์ name)
+// ใช้ Emoji Character โดยตรงเพื่อให้ API ของ ClickUp ทำงานได้เสถียรที่สุด
 const EMOJI_OPTIONS = [
-  { name: 'white_check_mark', icon: '✅' },
+  { name: 'check', icon: '✅' },
   { name: 'rocket', icon: '🚀' },
   { name: 'eyes', icon: '👀' },
   { name: 'heart', icon: '❤️' },
@@ -36,6 +36,16 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
   const [quickComment, setQuickComment] = useState('');
   const [sendingQuickComment, setSendingQuickComment] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [summaryText, setSummaryText] = useState('');
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
+  const [editSubtaskName, setEditSubtaskName] = useState('');
+  const [editSubtaskDesc, setEditSubtaskDesc] = useState('');
+  const [editSubtaskAssignees, setEditSubtaskAssignees] = useState<number[]>([]);
+  const [isSavingSubtask, setIsSavingSubtask] = useState(false);
+  const [subtaskSortBy, setSubtaskSortBy] = useState<'date' | 'name' | 'status'>('date');
+  const [listMembers, setListMembers] = useState<any[]>([]);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -48,6 +58,12 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
       ]);
       setTask(t);
       setComments(c);
+      
+      // Fetch list members if we have list ID
+      if (t.list?.id) {
+        const members = await clickUpService.getListMembers(config.apiToken, t.list.id);
+        setListMembers(members);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -114,14 +130,78 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
     }
   };
 
-  const handleAddReaction = async (commentId: string, reactionName: string) => {
+  const handleAddReaction = async (commentId: string, emoji: string) => {
     try {
-      await clickUpService.addReaction(config.apiToken, commentId, reactionName);
+      await clickUpService.addReaction(config.apiToken, commentId, emoji);
+      await fetchDetails(false);
+    } catch (err) {
+      console.error('Reaction Error:', err);
+      // ถ้า Error เพราะมี Reaction อยู่แล้ว (400) ไม่ต้องแจ้งเตือนผู้ใช้ให้ตกใจ
+      if (err instanceof Error && !err.message.includes('already exists')) {
+        alert('ไม่สามารถกด Reaction ได้: ' + err.message);
+      } else if (!(err instanceof Error)) {
+         alert('ไม่สามารถกด Reaction ได้');
+      }
+    }
+  };
+
+  const handleSummarize = async () => {
+    if (comments.length === 0) return;
+    setIsSummarizing(true);
+    try {
+      const summary = await geminiService.summarizeComments(comments);
+      setSummaryText(summary);
+    } catch (err) {
+      console.error(err);
+      alert('ไม่สามารถสรุปข้อมูลได้');
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
+  const handleStartEditSubtask = (s: ClickUpTask) => {
+    setEditingSubtaskId(s.id);
+    setEditSubtaskName(s.name);
+    setEditSubtaskDesc(s.description || s.markdown_description || '');
+    setEditSubtaskAssignees(s.assignees?.map(u => u.id) || []);
+  };
+
+  const handleSaveSubtask = async () => {
+    if (!editingSubtaskId) return;
+    setIsSavingSubtask(true);
+    try {
+      await clickUpService.updateTask(config.apiToken, editingSubtaskId, {
+        name: editSubtaskName,
+        description: editSubtaskDesc,
+        assignees: editSubtaskAssignees
+      });
+      setEditingSubtaskId(null);
       await fetchDetails(false);
     } catch (err) {
       console.error(err);
-      alert('ไม่สามารถกด Reaction ได้: ' + (err instanceof Error ? err.message : 'เกิดข้อผิดพลาด'));
+      alert('ไม่สามารถบันทึกการเปลี่ยนแปลงได้');
+    } finally {
+      setIsSavingSubtask(false);
     }
+  };
+
+  const handleDeleteSubtask = async (subtaskId: string) => {
+    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบ Subtask นี้?')) return;
+    try {
+      await clickUpService.deleteTask(config.apiToken, subtaskId);
+      await fetchDetails(false);
+    } catch (err) {
+      console.error(err);
+      alert('ไม่สามารถลบ Subtask ได้');
+    }
+  };
+
+  const toggleSubtaskAssignee = (userId: number) => {
+    setEditSubtaskAssignees(prev => 
+      prev.includes(userId) 
+        ? prev.filter(id => id !== userId) 
+        : [...prev, userId]
+    );
   };
 
   const copyToClipboard = async (text: string) => {
@@ -173,7 +253,28 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
     if (!bugDescription && bugImages.length === 0) return;
     setReporting(true);
     try {
-      const analysis = await geminiService.generateBugReport(bugDescription, bugImages[0] || undefined);
+      // วิเคราะห์หาลำดับคอมเมนต์ที่เป็นประวัติบัค/ปัญหา เพื่อส่งให้ AI วิเคราะห์บริบท
+      const bugRelatedHistory = comments
+        .filter(c => {
+          const text = c.comment_text.toLowerCase();
+          const reactions = (c.reactions || []).map(r => r.reaction.toLowerCase());
+          return (
+            text.includes('🚨') || 
+            text.includes('บัค') || 
+            text.includes('bug') || 
+            text.includes('error') || 
+            text.includes('ปัญหา') || 
+            text.includes('fail') ||
+            reactions.some(r => r === '❌' || r === 'bug' || r.includes('alert') || r === 'caution')
+          );
+        })
+        .slice(0, 10); // เอาเฉพาะ 10 คอมเมนต์ล่าสุดที่เกี่ยวข้อง
+
+      const analysis = await geminiService.generateBugReport(
+        bugDescription, 
+        bugImages[0] || undefined, 
+        bugRelatedHistory
+      );
       
       const attachmentUrls: string[] = [];
       if (bugImages.length > 0) {
@@ -251,33 +352,25 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
     return (c.reactions || []).some(isSuccessReaction);
   }
 
-  const checkDevTodo = (c: ClickUpComment) => {
-    const nameStr = c.comment_text;
-    const reactions = c.reactions || [];
-    const isIssue = nameStr.includes('🚨') || nameStr.includes('❌') || reactions.some(isIssueReaction);
-    const isFixed = c.resolved === true || reactions.some(isSuccessReaction);
-    return isIssue && !isFixed;
-  };
-
-  const checkTesterTodo = (c: ClickUpComment) => {
-    const isDevResolved = checkResolved(c);
-    const hasAnySuccessReaction = (c.reactions || []).some(isSuccessReaction);
-    return isDevResolved && !hasAnySuccessReaction;
-  };
+  const checkWaitingAssign = (c: ClickUpComment) => !c.assignee;
+  const checkDevFixing = (c: ClickUpComment) => !!c.assignee && !checkResolved(c);
+  const checkWaitingTest = (c: ClickUpComment) => !!c.assignee && checkResolved(c) && !checkTested(c);
 
   const isTested = comments.some(checkTested);
   const isResolved = comments.some(checkResolved);
-  const isRejected = comments.some(checkDevTodo);
-  const devTodoCount = comments.filter(checkDevTodo).length;
-  const testerTodoCount = comments.filter(checkTesterTodo).length;
+  const isRejected = comments.some(checkDevFixing);
+  const waitingAssignCount = comments.filter(checkWaitingAssign).length;
+  const devFixingCount = comments.filter(checkDevFixing).length;
+  const waitingTestCount = comments.filter(checkWaitingTest).length;
+  const testedCount = comments.filter(checkTested).length;
+  const totalComments = comments.length;
+  const progressPercent = totalComments > 0 ? (testedCount / totalComments) * 100 : 0;
 
   const filteredComments = comments.filter(c => {
     if (activeFilter === 'all') return true;
-    if (activeFilter === 'dev-todo') return checkDevTodo(c);
-    if (activeFilter === 'tester-todo') return checkTesterTodo(c);
-    if (activeFilter === 'bug') return c.comment_text.includes('🚨') || c.comment_text.includes('บัค');
-    if (activeFilter === 'assigned') return !!c.assignee;
-    if (activeFilter === 'resolved') return checkResolved(c);
+    if (activeFilter === 'waiting-assign') return checkWaitingAssign(c);
+    if (activeFilter === 'dev-fixing') return checkDevFixing(c);
+    if (activeFilter === 'waiting-test') return checkWaitingTest(c);
     if (activeFilter === 'tested') return checkTested(c);
     return true;
   });
@@ -341,15 +434,69 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
                {isResolved && <span className="text-[10px] font-black bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded uppercase flex items-center gap-1">🚀 Resolved</span>}
                {isRejected && <span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded uppercase flex items-center gap-1">🚨 Issue Detected</span>}
             </div>
-            <h2 className="text-2xl font-black text-gray-900 leading-tight">{task.name}</h2>
+            <h2 className="text-2xl font-black text-gray-900 leading-tight mb-2">{task.name}</h2>
+            
+            {task.assignees && task.assignees.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Assignees:</span>
+                <div className="flex -space-x-2">
+                  {task.assignees.map((u) => (
+                    <div 
+                      key={u.id} 
+                      className="w-7 h-7 rounded-full border-2 border-white bg-indigo-600 flex items-center justify-center text-[9px] font-black text-white shadow-sm ring-1 ring-gray-100"
+                      style={{ backgroundColor: u.color }}
+                      title={u.username}
+                    >
+                      {u.initials}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1 ml-1">
+                   {task.assignees.map(u => (
+                      <span key={u.id} className="text-[9px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{u.username}</span>
+                   ))}
+                </div>
+              </div>
+            )}
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full text-gray-400 transition">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-          </button>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => window.open(task?.url, '_blank')}
+              className="px-4 py-2 bg-white border border-gray-200 rounded-xl text-[10px] font-black text-gray-500 hover:text-indigo-600 hover:border-indigo-600 transition flex items-center gap-2"
+            >
+              <img src="https://clickup.com/favicon.ico" className="w-3 h-3" alt="ClickUp" />
+              Open in ClickUp
+            </button>
+            <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full text-gray-400 transition">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 flex flex-col lg:flex-row gap-8">
           <div className="flex-1 space-y-8">
+            {/* Status Stepper */}
+            <div className="flex items-center justify-between gap-2 bg-gray-50/50 p-4 rounded-3xl border border-gray-100 mb-6 flex-wrap sm:flex-nowrap">
+                {[
+                    { label: 'Backlog', icon: '📥', active: true },
+                    { label: 'Development', icon: '💻', active: isResolved || isRejected || testedCount > 0 },
+                    { label: 'Testing', icon: '🧪', active: isResolved || testedCount > 0 },
+                    { label: 'Done', icon: '🎉', active: progressPercent === 100 && totalComments > 0 }
+                ].map((step, i, arr) => (
+                    <React.Fragment key={step.label}>
+                        <div className="flex flex-col items-center gap-1 flex-1 min-w-[60px]">
+                            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg shadow-sm transition-all duration-500 ${step.active ? 'bg-indigo-600 text-white scale-110' : 'bg-white text-gray-300 border border-gray-100'}`}>
+                                {step.icon}
+                            </div>
+                            <span className={`text-[9px] font-black uppercase tracking-tighter ${step.active ? 'text-indigo-600' : 'text-gray-300'}`}>{step.label}</span>
+                        </div>
+                        {i < arr.length - 1 && (
+                            <div className={`hidden sm:block h-0.5 flex-1 mx-2 rounded-full transition-all duration-1000 ${step.active && arr[i+1].active ? 'bg-indigo-600' : 'bg-gray-200'}`} />
+                        )}
+                    </React.Fragment>
+                ))}
+            </div>
+
             {/* Description */}
             <section>
               <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Description รายละเอียด</h3>
@@ -358,36 +505,199 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
               </div>
             </section>
 
+            {/* Subtasks */}
+            {task.subtasks && task.subtasks.length > 0 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Subtasks งานย่อย ({task.subtasks.length})</h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black text-gray-400">Sort by:</span>
+                    <select 
+                      value={subtaskSortBy} 
+                      onChange={(e) => setSubtaskSortBy(e.target.value as any)}
+                      className="text-[10px] font-black bg-white border border-gray-200 rounded px-2 py-0.5 outline-none focus:border-indigo-600"
+                    >
+                      <option value="date">วันที่สร้าง</option>
+                      <option value="name">ชื่อ</option>
+                      <option value="status">สถานะ</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {[...task.subtasks].sort((a, b) => {
+                    if (subtaskSortBy === 'name') return a.name.localeCompare(b.name);
+                    if (subtaskSortBy === 'status') return a.status.status.localeCompare(b.status.status);
+                    return parseInt(b.date_created || '0') - parseInt(a.date_created || '0');
+                  }).map(s => (
+                    <div key={s.id} className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition group">
+                      {editingSubtaskId === s.id ? (
+                        <div className="space-y-4">
+                          <div className="space-y-3">
+                            <input 
+                              type="text" 
+                              value={editSubtaskName} 
+                              onChange={(e) => setEditSubtaskName(e.target.value)} 
+                              className="w-full text-sm font-black text-gray-900 border-b-2 border-indigo-600 focus:outline-none bg-indigo-50/30 p-1"
+                              placeholder="ชื่อ Subtask..."
+                            />
+                            <textarea 
+                              value={editSubtaskDesc} 
+                              onChange={(e) => setEditSubtaskDesc(e.target.value)} 
+                              className="w-full text-xs font-medium text-gray-600 focus:outline-none bg-gray-50 p-3 rounded-xl border border-gray-100 min-h-[80px]"
+                              placeholder="รายละเอียด (Markdown)..."
+                            />
+                          </div>
+                          
+                          <div className="space-y-2">
+                             <span className="text-[10px] font-black text-gray-400 uppercase">มอบหมายงานให้:</span>
+                             <div className="flex flex-wrap gap-2">
+                                {listMembers.map(m => {
+                                  const isSelected = editSubtaskAssignees.includes(m.id || m.user?.id);
+                                  const userId = m.id || m.user?.id;
+                                  const userData = m.user || m;
+                                  return (
+                                    <button 
+                                      key={userId} 
+                                      onClick={() => toggleSubtaskAssignee(userId)}
+                                      className={`flex items-center gap-2 p-1.5 rounded-lg border transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-100 text-gray-500 hover:border-indigo-300'}`}
+                                    >
+                                      <div className={`w-5 h-5 rounded flex items-center justify-center text-[7px] font-black text-white`} style={{ backgroundColor: isSelected ? 'transparent' : userData.color }}>{userData.initials}</div>
+                                      <span className="text-[9px] font-bold">{userData.username}</span>
+                                    </button>
+                                  );
+                                })}
+                             </div>
+                          </div>
+
+                          <div className="flex justify-end gap-2 pt-2">
+                            <button 
+                              onClick={() => setEditingSubtaskId(null)} 
+                              className="px-3 py-1.5 rounded-lg text-[10px] font-black text-gray-400 hover:bg-gray-100"
+                            >
+                              ยกเลิก
+                            </button>
+                            <button 
+                              onClick={handleSaveSubtask} 
+                              disabled={isSavingSubtask}
+                              className="px-4 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-black shadow-lg disabled:opacity-50"
+                            >
+                              {isSavingSubtask ? 'กำลังบันทึก...' : 'บันทึก'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                               <span className="text-[10px] font-black px-2 py-0.5 rounded uppercase text-white" style={{ backgroundColor: s.status.color }}>{s.status.status}</span>
+                               <h4 className="text-sm font-black text-gray-900">{s.name}</h4>
+                            </div>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                              <button 
+                                onClick={() => handleStartEditSubtask(s)}
+                                className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-indigo-600 transition"
+                                title="แก้ไข"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                </svg>
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteSubtask(s.id)}
+                                className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600 transition"
+                                title="ลบ"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          <div className="text-[11px] font-medium text-gray-500 whitespace-pre-wrap ml-1 underline-offset-4 decoration-gray-200 decoration-dotted">
+                            {s.description || s.markdown_description || <span className="italic text-gray-300">ไม่มีรายละเอียด</span>}
+                          </div>
+                          <div className="flex items-center justify-between mt-3">
+                            <div className="flex -space-x-1 overflow-hidden">
+                                {s.assignees && s.assignees.length > 0 ? s.assignees.map(u => (
+                                    <div key={u.id} className="w-5 h-5 rounded-full border border-white flex items-center justify-center text-[7px] font-black text-white" style={{ backgroundColor: u.color }} title={u.username}>{u.initials}</div>
+                                )) : (
+                                    <span className="text-[8px] font-bold text-gray-300 uppercase italic">Unassigned</span>
+                                )}
+                            </div>
+                            <span className="text-[8px] text-gray-300 font-bold uppercase">Created {s.date_created ? new Date(parseInt(s.date_created)).toLocaleDateString() : 'Unknown'}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Comments Area */}
             <section>
-              <div className="flex flex-col mb-6 gap-4">
+              <div className="flex flex-col mb-8 gap-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex flex-col gap-2">
-                    <h3 className="text-sm font-black text-gray-900 flex items-center gap-2">
-                      <span>💬</span> Comments ({comments.length})
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      <button onClick={() => setActiveFilter('all')} className={`text-[10px] font-black px-3 py-1.5 rounded-lg transition border-2 ${activeFilter === 'all' ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-300 hover:text-indigo-500'}`}>ทั้งหมด</button>
-                      <button onClick={() => setActiveFilter('dev-todo')} className={`text-[10px] font-black px-3 py-1.5 rounded-lg transition border-2 flex items-center gap-1.5 ${activeFilter === 'dev-todo' ? 'bg-rose-600 border-rose-600 text-white shadow-md' : 'bg-white border-rose-200 text-rose-600 hover:bg-rose-50'}`}>
-                        <span>🚨 Dev: ต้องแก้ไข</span>
-                        {devTodoCount > 0 && <span className="bg-rose-200 text-rose-800 px-1.5 rounded-full">{devTodoCount}</span>}
-                      </button>
-                      <button onClick={() => setActiveFilter('tester-todo')} className={`text-[10px] font-black px-3 py-1.5 rounded-lg transition border-2 flex items-center gap-1.5 ${activeFilter === 'tester-todo' ? 'bg-amber-600 border-amber-600 text-white shadow-md' : 'bg-white border-amber-200 text-amber-600 hover:bg-amber-50'}`}>
-                        <span>🚀 Tester: ต้องตรวจ</span>
-                        {testerTodoCount > 0 && <span className="bg-amber-200 text-amber-800 px-1.5 rounded-full">{testerTodoCount}</span>}
-                      </button>
-                      <button onClick={handleExportCSV} className="text-[10px] font-black px-3 py-1.5 rounded-lg transition border-2 bg-white border-gray-200 text-gray-500 hover:border-indigo-300 hover:text-indigo-500 flex items-center gap-1.5">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                        CSV
-                      </button>
+                  <div className="flex flex-col gap-3 flex-1">
+                    <div className="flex items-center justify-between pr-4">
+                      <h3 className="text-sm font-black text-gray-900 flex items-center gap-2">
+                        <span>💬</span> Comments ({comments.length})
+                      </h3>
+                      {comments.length >= 2 && (
+                        <button 
+                          onClick={handleSummarize} 
+                          disabled={isSummarizing || loading}
+                          className="text-[10px] font-black bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-1.5 rounded-full hover:shadow-lg transition active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {isSummarizing ? "⏳ กำลังสรุป..." : "✨ AI สรุปบทสนทนา"}
+                        </button>
+                      )}
+                    </div>
+                    {summaryText && (
+                      <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-[2rem] border border-indigo-100 relative overflow-hidden animate-in slide-in-from-top-4 duration-500">
+                        <div className="absolute top-0 right-0 p-4 opacity-5 text-4xl font-black uppercase pointer-events-none">AI SUMMARY</div>
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-lg">✨</div>
+                          <h4 className="text-xs font-black text-indigo-900 uppercase">AI สรุปใจความสำคัญจากคอมเมนต์</h4>
+                          <button onClick={() => setSummaryText('')} className="ml-auto text-gray-400 hover:text-gray-600">×</button>
+                        </div>
+                        <div className="text-xs text-indigo-950 font-bold leading-relaxed whitespace-pre-wrap">
+                          {summaryText}
+                        </div>
+                      </div>
+                    )}
+                    <div className="bg-gray-100 p-1 rounded-2xl flex flex-wrap gap-1 border border-gray-200 w-fit">
+                      {[
+                        { id: 'all', label: 'ทั้งหมด', icon: '📁' },
+                        { id: 'waiting-assign', label: 'รอ assign', icon: '⌛', count: waitingAssignCount },
+                        { id: 'dev-fixing', label: 'Dev กำลังแก้', icon: '🚨', count: devFixingCount },
+                        { id: 'waiting-test', label: 'รอทดสอบ', icon: '🚀', count: waitingTestCount },
+                        { id: 'tested', label: 'ทดสอบแล้ว', icon: '✅', count: testedCount },
+                      ].map(tab => (
+                        <button 
+                          key={tab.id} 
+                          onClick={() => setActiveFilter(tab.id as CommentFilter)} 
+                          className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all flex items-center gap-2 ${activeFilter === tab.id ? 'bg-white text-indigo-700 shadow-sm border border-gray-100' : 'text-gray-500 hover:bg-white/50'}`}
+                        >
+                          <span className={activeFilter === tab.id ? '' : 'grayscale'}>{tab.icon}</span>
+                          <span className={activeFilter === tab.id ? '' : 'opacity-70'}>{tab.label}</span>
+                          {tab.count !== undefined && tab.count > 0 && (
+                            <span className={`px-1.5 rounded-full text-[8px] border ${activeFilter === tab.id ? 'bg-indigo-50 border-indigo-100' : 'bg-gray-200 border-gray-300'}`}>{tab.count}</span>
+                          )}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  <button onClick={() => setReportMode(!reportMode)} className={`text-xs font-black px-4 py-2 rounded-xl transition flex items-center gap-2 h-fit ${reportMode ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-indigo-600 text-white shadow-lg hover:bg-indigo-700'}`}>
-                    {reportMode ? '❌ ยกเลิก' : '🚨 แจ้งบัค (Reject)'}
-                  </button>
+                  <div className="flex flex-col gap-2 shrink-0 self-start">
+                    <button onClick={() => setReportMode(!reportMode)} className={`text-xs font-black px-4 py-2 rounded-xl transition flex items-center justify-center gap-2 min-w-[140px] ${reportMode ? 'bg-red-50 text-red-600 border border-red-200 font-bold' : 'bg-red-600 text-white shadow-lg hover:bg-red-700'}`}>
+                      {reportMode ? '❌ ยกเลิกรายงาน' : '🚨 แจ้งบัค (Reject)'}
+                    </button>
+                    <button onClick={handleExportCSV} className="text-[10px] font-black px-4 py-2 rounded-xl transition border border-gray-200 bg-white text-gray-400 hover:text-indigo-600 hover:border-indigo-600 flex items-center justify-center gap-2 shadow-sm">
+                       📥 Export CSV
+                    </button>
+                  </div>
                 </div>
               </div>
-
               {reportMode && (
                 <div onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} className={`mb-8 p-6 rounded-2xl border-2 transition-all ${isDragging ? 'bg-red-100 border-red-500' : 'bg-red-50 border-red-100'}`}>
                   <h4 className="font-black text-red-700 text-sm mb-4 uppercase">👾 AI Bug Reporter</h4>
@@ -415,30 +725,61 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
 
               {/* Comment List */}
               <div className="space-y-4">
-                {filteredComments.map(c => {
-                  const isDevTask = checkDevTodo(c);
-                  const isTesterTask = checkTesterTodo(c);
-                  const reactionGroups = (c.reactions || []).reduce((acc: any, curr) => {
-                     acc[curr.reaction] = (acc[curr.reaction] || 0) + 1;
+                {filteredComments.length === 0 ? (
+                    <div className="bg-gray-50/50 border-2 border-dashed border-gray-200 rounded-3xl p-12 flex flex-col items-center justify-center text-center">
+                        <div className="text-4xl mb-4 grayscale opacity-40">💬</div>
+                        <p className="font-black text-gray-400 text-sm mb-1">ยังไม่มีคอมเมนต์ในหมวดหมู่นี้</p>
+                        <p className="text-xs text-gray-300 font-bold">พิมพ์โต้ตอบด้านล่างเพื่อเริ่มการสนทนา</p>
+                    </div>
+                ) : filteredComments.map(c => {
+                  const isDevTask = checkDevFixing(c);
+                  const isTesterTask = checkWaitingTest(c);
+                  const isWaitingAssign = checkWaitingAssign(c);
+                  const reactionGroups = (c.reactions || []).reduce((acc: Record<string, { count: number, users: { id: number, username: string }[] }>, curr) => {
+                     if (!acc[curr.reaction]) {
+                        acc[curr.reaction] = { count: 0, users: [] };
+                     }
+                     acc[curr.reaction].count += 1;
+                     // หลีกเลี่ยงผู้ใช้ซ้ำในรายการสำหรับปุ่มเดียวถ้ากดย้ำ (ถึงแม้ ClickUp จะไม่น่าให้ทำ)
+                     if (!acc[curr.reaction].users.find(u => u.id === curr.user.id)) {
+                        acc[curr.reaction].users.push(curr.user);
+                     }
                      return acc;
                   }, {});
 
                   return (
-                    <div key={c.id} className={`p-4 rounded-2xl border transition group ${isDevTask ? 'border-rose-400 bg-rose-50/20' : isTesterTask ? 'border-amber-400 bg-amber-50/20' : 'bg-white border-gray-100 shadow-sm'}`}>
+                    <div key={c.id} className={`p-4 rounded-2xl border transition group ${isDevTask ? 'border-rose-400 bg-rose-50/20' : isTesterTask ? 'border-amber-400 bg-amber-50/20' : isWaitingAssign ? 'border-gray-300 bg-gray-50/10' : 'bg-white border-gray-100 shadow-sm'}`}>
                       <div className="flex items-start gap-3 mb-2">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-black" style={{ backgroundColor: c.user.color }}>{c.user.initials}</div>
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-black overflow-hidden bg-gray-100 shadow-sm border border-white" style={{ backgroundColor: c.user.color }}>
+                          {c.user.initials}
+                        </div>
                         <div className="flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs font-black">{c.user.username}</span>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="text-xs font-black text-gray-900">{c.user.username} <span className="text-[10px] font-bold text-gray-400 ml-1">#เจ้าของคอมเมนต์</span></span>
+                            {c.assignee && (
+                              <div className="flex items-center gap-1 bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded text-[8px] font-black border border-indigo-100 animate-in fade-in zoom-in-95">
+                                <span>🎯 มอบหมายให้: {c.assignee.username}</span>
+                              </div>
+                            )}
+                            {!c.assignee && (
+                              <span className="text-[8px] bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded font-black uppercase border border-dashed border-gray-300 italic">⚠️ ยังไม่มีการมอบหมาย</span>
+                            )}
                             {c.resolved && <span className="text-[8px] bg-emerald-500 text-white px-1.5 py-0.5 rounded font-black uppercase">Resolved</span>}
-                            {isDevTask && <span className="text-[8px] bg-rose-600 text-white px-1.5 py-0.5 rounded font-black uppercase">Action Req.</span>}
+                            {isDevTask && <span className="text-[8px] bg-rose-600 text-white px-1.5 py-0.5 rounded font-black uppercase">Developing</span>}
                           </div>
                           <span className="text-[9px] text-gray-400 font-bold">{new Date(parseInt(c.date)).toLocaleString()}</span>
                         </div>
                         {/* Reaction Picker on Hover */}
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition p-1 bg-gray-50 rounded-lg border">
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition p-1 bg-gray-50 rounded-lg border shadow-sm">
                            {EMOJI_OPTIONS.map(opt => (
-                             <button key={opt.name} onClick={() => handleAddReaction(c.id, opt.name)} className="text-sm hover:scale-125 transition" title={opt.name}>{opt.icon}</button>
+                             <button 
+                               key={opt.name} 
+                               onClick={() => handleAddReaction(c.id, opt.icon)} 
+                               className="text-sm p-1 hover:bg-white hover:scale-125 transition rounded-md shadow-sm active:scale-95" 
+                               title={opt.name}
+                             >
+                               {opt.icon}
+                             </button>
                            ))}
                         </div>
                       </div>
@@ -447,10 +788,33 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
                       </div>
                       {Object.keys(reactionGroups).length > 0 && (
                         <div className="flex flex-wrap gap-2 pl-11 mt-3">
-                          {Object.entries(reactionGroups).map(([reaction, count]) => (
-                            <button key={reaction} onClick={() => handleAddReaction(c.id, reaction)} className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 px-2 py-1 rounded-lg hover:bg-indigo-100 transition">
-                              <span className="text-xs">{getEmojiIcon(reaction)}</span>
-                              <span className="text-[10px] font-black text-indigo-600">{(count as number)}</span>
+                          {Object.entries(reactionGroups).map(([reaction, data]) => (
+                            <button 
+                              key={reaction} 
+                              onClick={() => handleAddReaction(c.id, reaction)} 
+                              className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 px-2 py-1 rounded-full hover:bg-white hover:border-indigo-400 transition-all shadow-sm group/react"
+                              title={data.users.map(u => u.username).join(', ')}
+                            >
+                              <span className="text-xs group-hover/react:scale-110 transition">{getEmojiIcon(reaction)}</span>
+                              
+                              <div className="flex -space-x-2 overflow-hidden mr-1">
+                                {data.users.slice(0, 3).map((u) => (
+                                  <div 
+                                    key={u.id} 
+                                    className="w-4 h-4 rounded-full border border-white bg-indigo-600 flex items-center justify-center text-[6px] font-black text-white shadow-sm"
+                                    title={u.username}
+                                  >
+                                    {u.username.substring(0, 1).toUpperCase()}
+                                  </div>
+                                ))}
+                                {data.users.length > 3 && (
+                                  <div className="w-4 h-4 rounded-full border border-white bg-gray-400 flex items-center justify-center text-[5px] font-black text-white">
+                                    +{data.users.length - 3}
+                                  </div>
+                                )}
+                              </div>
+
+                              <span className="text-[10px] font-black text-indigo-600">{data.count}</span>
                             </button>
                           ))}
                         </div>
@@ -463,8 +827,8 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
           </div>
 
           {/* Sidebar */}
-          <div className="w-full lg:w-72 space-y-6 flex-shrink-0">
-            <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 space-y-4">
+          <div className="w-full lg:w-80 space-y-6 flex-shrink-0">
+            <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4">
               <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest border-b pb-2">ผู้รับผิดชอบ</h4>
               <div className="space-y-2">
                 {task.assignees?.map(u => (
@@ -476,17 +840,69 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
               </div>
             </div>
 
-            <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100 space-y-4">
-              <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest border-b border-indigo-100 pb-2">สถานะ AI</h4>
-              <div className="space-y-3">
-                 <div className="flex justify-between items-center text-[11px] font-bold">
-                   <span className="text-gray-500">Tested</span>
-                   <span className={isTested ? "text-emerald-600" : "text-gray-400"}>{isTested ? "YES ✅" : "NO"}</span>
-                 </div>
-                 <div className="flex justify-between items-center text-[11px] font-bold">
-                   <span className="text-gray-500">Resolved</span>
-                   <span className={isResolved ? "text-indigo-600" : "text-gray-400"}>{isResolved ? "YES 🚀" : "NO"}</span>
-                 </div>
+            <div className="bg-indigo-50/30 p-5 rounded-2xl border border-indigo-100 space-y-5">
+              <div className="flex justify-between items-center border-b border-indigo-100 pb-2">
+                <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">ความคืบหน้าการทดสอบ</h4>
+                <span className={`text-[10px] font-black px-2 py-0.5 rounded ${isRejected ? 'bg-red-500 text-white' : 'bg-indigo-600 text-white'}`}>
+                  {isRejected ? 'ISSUES FOUND' : 'HEALTHY'}
+                </span>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[10px] font-black uppercase">
+                    <span className="text-gray-500">Quality Indicator</span>
+                    <span className={isRejected ? 'text-red-600' : 'text-emerald-600'}>
+                      {Math.round(progressPercent)}%
+                    </span>
+                  </div>
+                  <div className="h-3 bg-gray-200 rounded-full overflow-hidden shadow-inner">
+                    <div 
+                      className={`h-full transition-all duration-1000 ease-out rounded-full ${isRejected ? 'bg-red-500' : 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]'}`}
+                      style={{ width: `${progressPercent}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[9px] font-black uppercase">
+                  <div className="bg-white/50 p-2 rounded-lg border border-indigo-100">
+                    <p className="text-gray-400 mb-1">Testing Stats</p>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Total</span>
+                        <span className="text-gray-900">{totalComments}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-emerald-600">Passed</span>
+                        <span className="text-emerald-600">{testedCount}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`p-2 rounded-lg border ${isRejected ? 'bg-red-100/50 border-red-200' : 'bg-white/50 border-indigo-100'}`}>
+                    <p className="text-gray-400 mb-1">Risk Level</p>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between">
+                        <span className={isRejected ? 'text-red-700' : 'text-gray-500'}>Fixing</span>
+                        <span className={isRejected ? 'text-red-700' : 'text-gray-900'}>{devFixingCount}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-amber-600 font-black">Waiting Test</span>
+                        <span className="text-amber-600">{waitingTestCount}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2 border-t border-indigo-100 pt-3">
+                   <div className="flex justify-between items-center text-[10px] font-bold">
+                     <span className="text-gray-500">Tested</span>
+                     <span className={isTested ? "text-emerald-600" : "text-gray-400"}>{isTested ? "YES ✅" : "NO"}</span>
+                   </div>
+                   <div className="flex justify-between items-center text-[10px] font-bold">
+                     <span className="text-gray-500">Resolved</span>
+                     <span className={isResolved ? "text-indigo-600" : "text-gray-400"}>{isResolved ? "YES 🚀" : "NO"}</span>
+                   </div>
+                </div>
               </div>
             </div>
           </div>

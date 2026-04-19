@@ -91,7 +91,7 @@ export const clickUpService = {
   },
 
   getTaskDetails: async (token: string, taskId: string): Promise<ClickUpTask> => {
-    const response = await fetch(`${BASE_URL}/task/${taskId}`, {
+    const response = await fetch(`${BASE_URL}/task/${taskId}?subtasks=true`, {
       headers: { Authorization: token },
     });
     if (!response.ok) throw new Error('Failed to fetch task details');
@@ -170,10 +170,7 @@ export const clickUpService = {
         Authorization: token,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ 
-        reaction, 
-        reactions: [reaction]
-      }),
+      body: JSON.stringify({ reaction }),
     });
     
     if (!response.ok) {
@@ -194,7 +191,20 @@ export const clickUpService = {
     return data.statuses;
   },
 
-  createTask: async (token: string, listId: string, title: string, markdownDescription: string) => {
+  updateTask: async (token: string, taskId: string, data: { status?: string, name?: string, description?: string, markdown_description?: string, assignees?: number[] }) => {
+    const response = await fetch(`${BASE_URL}/task/${taskId}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to update task');
+    return response.json();
+  },
+
+  createTask: async (token: string, listId: string, title: string, markdownDescription: string, priority?: number) => {
     const response = await fetch(`${BASE_URL}/list/${listId}/task`, {
       method: 'POST',
       headers: {
@@ -205,11 +215,56 @@ export const clickUpService = {
         name: title,
         markdown_description: markdownDescription,
         status: 'to do',
-        priority: 3,
+        priority: priority || 3,
       }),
     });
     if (!response.ok) throw new Error('Failed to create task');
     return response.json();
+  },
+
+  createSubtask: async (token: string, parentTaskId: string, title: string, markdownDescription: string, priority?: number) => {
+    // We need to find the listId of the parent task first
+    const parentResponse = await fetch(`${BASE_URL}/task/${parentTaskId}`, {
+      headers: { Authorization: token },
+    });
+    if (!parentResponse.ok) throw new Error('Failed to fetch parent task details');
+    const parentData = await parentResponse.json();
+    const listId = parentData.list.id;
+
+    const response = await fetch(`${BASE_URL}/list/${listId}/task`, {
+      method: 'POST',
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: title,
+        markdown_description: markdownDescription,
+        parent: parentTaskId,
+        status: 'to do',
+        priority: priority || 3,
+      }),
+    });
+    if (!response.ok) throw new Error('Failed to create subtask');
+    return response.json();
+  },
+
+  deleteTask: async (token: string, taskId: string) => {
+    const response = await fetch(`${BASE_URL}/task/${taskId}`, {
+      method: 'DELETE',
+      headers: { Authorization: token },
+    });
+    if (!response.ok) throw new Error('Failed to delete task');
+    return response.json();
+  },
+
+  getListMembers: async (token: string, listId: string) => {
+    const response = await fetch(`${BASE_URL}/list/${listId}/member`, {
+      headers: { Authorization: token },
+    });
+    if (!response.ok) throw new Error('Failed to fetch list members');
+    const data = await response.json();
+    return data.members || [];
   },
 
   uploadAttachment: async (token: string, taskId: string, base64Data: string) => {

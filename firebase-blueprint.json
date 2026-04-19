@@ -25,6 +25,19 @@
           "type": "string",
           "description": "Selected ClickUp List ID"
         },
+        "recentBoards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "listId": { "type": "string" },
+              "workspaceId": { "type": "string" },
+              "name": { "type": "string" },
+              "lastUsed": { "type": "string", "format": "date-time" }
+            }
+          },
+          "description": "List of recently used ClickUp boards"
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",

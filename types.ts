@@ -3,6 +3,14 @@ export interface ClickUpConfig {
   apiToken: string;
   workspaceId: string;
   listId: string;
+  recentBoards?: RecentBoard[];
+}
+
+export interface RecentBoard {
+  listId: string;
+  workspaceId: string;
+  name: string;
+  lastUsed: string;
 }
 
 export interface ClickUpStatus {
@@ -77,6 +85,10 @@ export interface ClickUpTask {
   };
   assignees?: ClickUpAssignee[];
   comment_count?: number;
+  url?: string;
+  subtasks?: ClickUpTask[];
+  date_created?: string;
+  date_updated?: string;
 }
 
 export interface AcceptanceCriterion {
@@ -89,12 +101,16 @@ export interface SystemAnalysis {
   topic: string;
   system: 'business' | 'backoffice' | 'advertising funnel' | 'salehere' | 'other';
   feature: string;
+  priorityLabel: 'Urgent' | 'High' | 'Normal' | 'Low';
+  priorityLevel: number; // ClickUp mapping: 1=Urgent, 2=High, 3=Normal, 4=Low
+  storyPoints: number;
   suggestedTags: string[];
   categories: {
-    name: string;
+    name: string; // e.g., "UI/UX Design", "Backend Development"
     details: string[];
   }[];
   acceptanceCriteria: AcceptanceCriterion[];
+  definitionOfDone: string[];
   keynoteSlides: {
     title: string;
     content: string[];
