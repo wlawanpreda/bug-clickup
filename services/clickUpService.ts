@@ -36,6 +36,15 @@ export const clickUpService = {
     return data.teams.map((t: any) => ({ id: t.id, name: t.name }));
   },
 
+  getMe: async (token: string) => {
+    const response = await fetchWithRetry(`${BASE_URL}/user`, {
+      headers: { Authorization: token },
+    });
+    if (!response.ok) throw new Error('Failed to fetch user');
+    const data = await response.json();
+    return data.user;
+  },
+
   getAllLists: async (token: string, teamId: string): Promise<List[]> => {
     const spacesRes = await fetchWithRetry(`${BASE_URL}/team/${teamId}/space`, {
       headers: { Authorization: token },
@@ -221,7 +230,7 @@ export const clickUpService = {
     return response.json();
   },
 
-  createTask: async (token: string, listId: string, title: string, markdownDescription: string, priority?: number) => {
+  createTask: async (token: string, listId: string, title: string, markdownDescription: string, priority?: number, assignees?: number[]) => {
     const response = await fetchWithRetry(`${BASE_URL}/list/${listId}/task`, {
       method: 'POST',
       headers: {
@@ -233,6 +242,7 @@ export const clickUpService = {
         markdown_description: markdownDescription,
         status: 'to do',
         priority: priority || 3,
+        assignees: assignees || [],
       }),
     });
     if (!response.ok) throw new Error('Failed to create task');

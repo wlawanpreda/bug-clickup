@@ -1,20 +1,20 @@
 
 import React, { useState, useEffect } from 'react';
-import { SystemAnalysis, ClickUpConfig, ClickUpCustomField } from '../types';
+import { SystemAnalysis, ClickUpConfig, ClickUpCustomField, ClickUpAssignee } from '../types';
 import { clickUpService } from '../services/clickUpService';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
   analysis: SystemAnalysis;
   config: ClickUpConfig;
   images: string[];
   purpose: string;
-  notifyRoom: string;
   onQuestionAnswered: (answer: string) => void;
   onReset: () => void;
   onTaskCreated: () => void;
 }
 
-const AnalysisDisplay: React.FC<Props> = ({ analysis, config, images, purpose, notifyRoom, onQuestionAnswered, onReset, onTaskCreated }) => {
+const AnalysisDisplay: React.FC<Props> = ({ analysis, config, images, purpose, onQuestionAnswered, onReset, onTaskCreated }) => {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [userAnswer, setUserAnswer] = useState('');
@@ -22,12 +22,14 @@ const AnalysisDisplay: React.FC<Props> = ({ analysis, config, images, purpose, n
   const [customFields, setCustomFields] = useState<ClickUpCustomField[]>([]);
   const [selectedFieldValues, setSelectedFieldValues] = useState<Record<string, string[]>>({});
   const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [members, setMembers] = useState<ClickUpAssignee[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
 
   const [editableSystem, setEditableSystem] = useState(analysis.system);
   const [editableFeature, setEditableFeature] = useState(analysis.feature);
   const [editableTopic, setEditableTopic] = useState(analysis.topic);
   const [createSubtasks, setCreateSubtasks] = useState(true);
-  const [showSlidePreview, setShowSlidePreview] = useState(false);
 
   const systems = ['business', 'backoffice', 'advertising funnel', 'salehere', 'other'] as const;
 
@@ -43,8 +45,30 @@ const AnalysisDisplay: React.FC<Props> = ({ analysis, config, images, purpose, n
         setFieldsLoading(false);
       }
     };
+    
+    const fetchMembers = async () => {
+      setMembersLoading(true);
+      try {
+        const data = await clickUpService.getListMembers(config.apiToken, config.listId);
+        setMembers(data);
+      } catch (err) {
+        console.error("Failed to fetch members", err);
+      } finally {
+        setMembersLoading(false);
+      }
+    };
+
     fetchFields();
+    fetchMembers();
   }, [config]);
+
+  const toggleMember = (memberId: number) => {
+    setSelectedMemberIds(prev => 
+      prev.includes(memberId) 
+        ? prev.filter(id => id !== memberId) 
+        : [...prev, memberId]
+    );
+  };
 
   const toggleOption = (fieldId: string, optionId: string) => {
     setSelectedFieldValues(prev => {
@@ -67,15 +91,9 @@ const AnalysisDisplay: React.FC<Props> = ({ analysis, config, images, purpose, n
   const handleSendToClickUp = async () => {
     setSending(true);
     try {
+      const displayPurpose = analysis.refinedPurpose || purpose;
       const markdown = `
-**📌 วัตถุประสงค์ (Purpose):**
-${purpose || 'ไม่ได้ระบุ'}
-
-**📍 แจ้งเตือนห้อง (Notify):**
-${notifyRoom || 'ไม่ได้ระบุ'}
-
----
-
+${displayPurpose ? `**📌 วัตถุประสงค์ (Purpose):**\n${displayPurpose}\n\n---\n\n` : ''}
 ### 💡 รายละเอียดและตรรกะทางธุรกิจ (Business Logic)
 ${analysis.categories.map(c => `**[${c.name}]**\n${c.details.map(d => `- ${d}`).join('\n')}`).join('\n\n')}
 
@@ -97,7 +115,7 @@ ${analysis.definitionOfDone.map(d => `- [ ] ${d}`).join('\n')}
 - **ฟีเจอร์:** ${editableFeature}
       `;
 
-      const task = await clickUpService.createTask(config.apiToken, config.listId, finalTitle, markdown, analysis.priorityLevel);
+      const task = await clickUpService.createTask(config.apiToken, config.listId, finalTitle, markdown, analysis.priorityLevel, selectedMemberIds);
       
       if (task?.id) {
         // อัปโหลดรูปภาพทั้งหมด
@@ -220,10 +238,62 @@ ${analysis.definitionOfDone.map(d => `- [ ] ${d}`).join('\n')}
             </div>
           )}
 
-          <div className="bg-white p-4 rounded-xl border-2 border-dashed border-indigo-200">
+          <div className="bg-white p-4 rounded-xl border-2 border-dashed border-indigo-200 mb-6">
              <span className="text-[9px] font-black text-gray-400 uppercase mb-1 block">ชื่อที่จะปรากฏใน ClickUp</span>
              <p className="text-lg font-black text-indigo-950 break-all">{finalTitle}</p>
           </div>
+
+          {!membersLoading && members.length > 0 && (
+            <div className="space-y-4 pt-4 border-t border-indigo-100">
+               <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                 ⚡ มอบหมายงาน (Assignees)
+               </h4>
+               <div className="flex flex-wrap gap-4">
+                  {members.map(member => {
+                    const isSelected = selectedMemberIds.includes(member.id);
+                    return (
+                      <button
+                        key={member.id}
+                        onClick={() => toggleMember(member.id)}
+                        className={`flex items-center gap-3 p-2 pr-4 rounded-2xl transition-all duration-300 border-2 ${
+                          isSelected 
+                            ? 'bg-indigo-50 border-indigo-600 scale-105 shadow-md' 
+                            : 'bg-white border-gray-100 hover:border-indigo-200 filter grayscale opacity-60'
+                        }`}
+                      >
+                        <div className="relative">
+                          {member.profilePicture ? (
+                            <img 
+                              src={member.profilePicture} 
+                              alt={member.username}
+                              className="w-8 h-8 rounded-xl object-cover border-2 border-white shadow-sm"
+                            />
+                          ) : (
+                            <div 
+                              className="w-8 h-8 rounded-xl flex items-center justify-center text-[10px] font-black text-white shadow-sm"
+                              style={{ backgroundColor: member.color || '#4F46E5' }}
+                            >
+                              {member.initials}
+                            </div>
+                          )}
+                          {isSelected && (
+                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-indigo-600 border-2 border-white rounded-full flex items-center justify-center">
+                               <div className="w-1 h-1 bg-white rounded-full"></div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-left">
+                           <p className={`text-[11px] font-black leading-none mb-1 ${isSelected ? 'text-indigo-900' : 'text-gray-500'}`}>
+                             {member.username}
+                           </p>
+                           <p className="text-[9px] font-bold text-gray-400">Team Member</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+               </div>
+            </div>
+          )}
         </div>
 
           {analysis.acceptanceCriteria && analysis.acceptanceCriteria.length > 0 && (
@@ -266,8 +336,8 @@ ${analysis.definitionOfDone.map(d => `- [ ] ${d}`).join('\n')}
             </section>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
-              <div className="lg:col-span-2 bg-slate-900 p-8 rounded-[2rem] text-white shadow-2xl relative overflow-hidden group">
+          <div className="grid grid-cols-1 gap-6 mb-10">
+              <div className="bg-slate-900 p-8 rounded-[2rem] text-white shadow-2xl relative overflow-hidden group">
                  <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-indigo-500/20 rounded-full blur-3xl group-hover:bg-indigo-500/40 transition"></div>
                  <h3 className="text-indigo-400 text-[10px] font-black uppercase tracking-widest mb-2">AI Implementation Strategy</h3>
                  <h2 className="text-2xl font-black mb-6">คำแนะนำเชิงเทคนิคและการประเมิน (AI Recommendation)</h2>
@@ -305,43 +375,7 @@ ${analysis.definitionOfDone.map(d => `- [ ] ${d}`).join('\n')}
                     </div>
                  </div>
               </div>
-
-              <div className="bg-gradient-to-br from-purple-500 to-indigo-600 p-8 rounded-[2rem] text-white shadow-xl flex flex-col items-center justify-center text-center space-y-4 group cursor-pointer hover:scale-[1.02] transition" onClick={() => setShowSlidePreview(!showSlidePreview)}>
-                  <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center text-3xl mb-2 backdrop-blur-sm group-hover:rotate-12 transition">📽️</div>
-                  <h3 className="text-xl font-black">Presentation Preview</h3>
-                  <p className="text-xs font-medium text-white/80 leading-relaxed">ดูโครงร่างเนื้อหาสำหรับนำเสนอ Sprint Planning หรือ Showcase งาน</p>
-                  <button className="bg-white text-indigo-600 px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg group-hover:bg-indigo-50 transition">Preview Slide</button>
-              </div>
           </div>
-
-          {showSlidePreview && (
-             <div className="mb-10 bg-slate-50 p-8 rounded-[2rem] border-2 border-indigo-100 animate-in zoom-in-95 duration-300">
-                <div className="flex items-center justify-between mb-8">
-                   <h2 className="text-xl font-black text-indigo-900 flex items-center gap-3">
-                      <span className="text-2xl">🪄</span> Presentation Slide Preview
-                   </h2>
-                   <button onClick={() => setShowSlidePreview(false)} className="text-gray-400 hover:text-black font-black text-[10px] uppercase">Hide</button>
-                </div>
-                <div className="flex gap-6 overflow-x-auto pb-6 snap-x">
-                   {analysis.keynoteSlides.map((slide, i) => (
-                      <div key={i} className="min-w-[300px] aspect-[16/9] bg-white p-6 rounded-2xl shadow-lg border border-indigo-100 flex flex-col snap-center relative overflow-hidden">
-                         <div className="absolute top-0 right-0 p-4 font-black opacity-5 text-4xl">SLIDE {i+1}</div>
-                         <h4 className="text-indigo-600 text-[10px] font-black uppercase mb-3">Agenda #{i+1}</h4>
-                         <h3 className="text-lg font-black text-gray-900 mb-4">{slide.title}</h3>
-                         <ul className="space-y-2 flex-1">
-                            {slide.content.map((c, j) => (
-                               <li key={j} className="text-[10px] font-medium text-gray-600 list-disc list-inside marker:text-indigo-400">{c}</li>
-                            ))}
-                         </ul>
-                         <div className="mt-auto pt-4 border-t border-gray-50 flex items-center justify-between">
-                            <span className="text-[8px] font-black text-gray-300 uppercase">ClickUp Project Assistant</span>
-                            <span className="text-[8px] font-black text-gray-300">{i+1} / {analysis.keynoteSlides.length}</span>
-                         </div>
-                      </div>
-                   ))}
-                </div>
-             </div>
-          )}
 
           <div className="mb-10 lg:col-span-1">
               <div className="flex items-center justify-between mb-4">
@@ -375,41 +409,6 @@ ${analysis.definitionOfDone.map(d => `- [ ] ${d}`).join('\n')}
                 ))}
               </div>
           </div>
-
-          {analysis.followUpQuestions.length > 0 && !sent && (
-            <div className="mb-10 bg-amber-50 border-2 border-amber-300 p-8 rounded-[2rem] shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4 opacity-10 animate-pulse text-amber-900 text-5xl font-black">?</div>
-              <h3 className="text-amber-900 text-lg font-black mb-6 flex items-center gap-3">
-                <span className="bg-amber-600 text-white rounded-2xl w-10 h-10 flex items-center justify-center text-xl shadow-lg border-2 border-white">!</span>
-                AI ต้องการข้อมูลเชิงลึกเพิ่มเติม (Follow-up)
-              </h3>
-              <div className="space-y-4 mb-8">
-                {analysis.followUpQuestions.map((q, i) => (
-                  <div key={i} className="bg-white/60 p-4 rounded-2xl border border-amber-200 text-sm font-bold text-amber-950 shadow-sm">
-                    {q}
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-4">
-                <input
-                  type="text"
-                  value={userAnswer}
-                  onChange={(e) => setUserAnswer(e.target.value)}
-                  placeholder="ระบุรายละเอียดเพิ่มเติมเพื่อแม่นยำขึ้น..."
-                  className="flex-1 bg-white border-2 border-amber-200 rounded-2xl px-6 py-4 text-sm font-bold text-black focus:ring-4 focus:ring-amber-200 focus:border-amber-600 outline-none shadow-sm placeholder-gray-400 transition-all"
-                />
-                <button
-                  onClick={() => {
-                     onQuestionAnswered(userAnswer);
-                     setUserAnswer('');
-                  }}
-                  className="bg-amber-600 text-white px-8 py-4 rounded-2xl font-black text-sm hover:bg-amber-700 transition shadow-lg active:scale-95 whitespace-nowrap border-b-4 border-amber-800"
-                >
-                  วิเคราะห์ใหม่
-                </button>
-              </div>
-            </div>
-          )}
 
         <div className="mt-12 pt-8 border-t-2 border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-4 bg-gray-50 px-5 py-3 rounded-2xl border border-gray-200">

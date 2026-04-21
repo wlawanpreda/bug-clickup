@@ -29,7 +29,7 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [reportMode, setReportMode] = useState(false);
   const [bugDescription, setBugDescription] = useState('');
-  const [bugImages, setBugImages] = useState<string[]>([]);
+  const [bugMedia, setBugMedia] = useState<{ data: string, type: string }[]>([]);
   const [reporting, setReporting] = useState(false);
   const [activeFilter, setActiveFilter] = useState<CommentFilter>('all');
   const [copied, setCopied] = useState(false);
@@ -46,6 +46,11 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
   const [isSavingSubtask, setIsSavingSubtask] = useState(false);
   const [subtaskSortBy, setSubtaskSortBy] = useState<'date' | 'name' | 'status'>('date');
   const [listMembers, setListMembers] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [isEditingAssignees, setIsEditingAssignees] = useState(false);
+  const [tempMainAssignees, setTempMainAssignees] = useState<number[]>([]);
+  const [isSavingAssignees, setIsSavingAssignees] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -61,8 +66,12 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
       
       // Fetch list members if we have list ID
       if (t.list?.id) {
-        const members = await clickUpService.getListMembers(config.apiToken, t.list.id);
+        const [members, me] = await Promise.all([
+          clickUpService.getListMembers(config.apiToken, t.list.id),
+          clickUpService.getMe(config.apiToken)
+        ]);
         setListMembers(members);
+        setCurrentUser(me);
       }
     } catch (err) {
       console.error(err);
@@ -75,15 +84,46 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
     fetchDetails();
   }, [fetchDetails]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Close modal on Esc
+      if (e.key === 'Escape') {
+        onClose();
+      }
+
+      // Quick comment on Ctrl+Enter or Cmd+Enter
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        if (quickComment.trim()) {
+          handleQuickComment();
+        }
+      }
+
+      // Toggle Assignee Editing: Ctrl+E
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        setIsEditingAssignees(prev => !prev);
+      }
+
+      // Save Assignees: Ctrl+S (only if editing)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && isEditingAssignees) {
+        e.preventDefault();
+        handleSaveMainAssignees();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, quickComment, isEditingAssignees]);
+
   const processFiles = (files: FileList | null) => {
     if (!files) return;
     const fileList = Array.from(files);
     
     fileList.forEach(file => {
-      if (file.type.startsWith('image/')) {
+      if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
         const reader = new FileReader();
         reader.onloadend = () => {
-          setBugImages(prev => [...prev, reader.result as string]);
+          setBugMedia(prev => [...prev, { data: reader.result as string, type: file.type }]);
         };
         reader.readAsDataURL(file);
       }
@@ -111,8 +151,8 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
     setIsDragging(false);
   };
 
-  const removeBugImage = (index: number) => {
-    setBugImages(prev => prev.filter((_, i) => i !== index));
+  const removeBugMedia = (index: number) => {
+    setBugMedia(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleQuickComment = async () => {
@@ -214,6 +254,44 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
     }
   };
 
+  const handleSaveMainAssignees = async () => {
+    setIsSavingAssignees(true);
+    try {
+      await clickUpService.updateTask(config.apiToken, taskId, {
+        assignees: tempMainAssignees
+      });
+      setIsEditingAssignees(false);
+      await fetchDetails(false);
+    } catch (err) {
+      console.error(err);
+      alert('ไม่สามารถบันทึกผู้รับผิดชอบได้');
+    } finally {
+      setIsSavingAssignees(false);
+    }
+  };
+
+  const toggleMainAssignee = (userId: number) => {
+    setTempMainAssignees(prev => 
+      prev.includes(userId) 
+        ? prev.filter(id => id !== userId) 
+        : [...prev, userId]
+    );
+  };
+
+  const assignToMe = () => {
+    if (!currentUser) return;
+    const myId = currentUser.id;
+    setTempMainAssignees(prev => 
+      prev.includes(myId) ? prev : [...prev, myId]
+    );
+  };
+
+  const filteredMembers = listMembers.filter(m => {
+    const userData = m.user || m;
+    const name = (userData.username || '').toLowerCase();
+    return name.includes(memberSearch.toLowerCase());
+  });
+
   const handleExportCSV = () => {
     if (comments.length === 0) return;
 
@@ -250,7 +328,7 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
   };
 
   const submitBugReport = async () => {
-    if (!bugDescription && bugImages.length === 0) return;
+    if (!bugDescription && bugMedia.length === 0) return;
     setReporting(true);
     try {
       // วิเคราะห์หาลำดับคอมเมนต์ที่เป็นประวัติบัค/ปัญหา เพื่อส่งให้ AI วิเคราะห์บริบท
@@ -272,14 +350,14 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
 
       const analysis = await geminiService.generateBugReport(
         bugDescription, 
-        bugImages[0] || undefined, 
+        bugMedia.map(m => ({ data: m.data, mimeType: m.type })), 
         bugRelatedHistory
       );
       
       const attachmentUrls: string[] = [];
-      if (bugImages.length > 0) {
-        const uploadPromises = bugImages.map(img => 
-          clickUpService.uploadAttachment(config.apiToken, taskId, img)
+      if (bugMedia.length > 0) {
+        const uploadPromises = bugMedia.map(m => 
+          clickUpService.uploadAttachment(config.apiToken, taskId, m.data)
         );
         const results = await Promise.all(uploadPromises);
         results.forEach(res => {
@@ -287,16 +365,16 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
         });
       }
       
-      const imageLinksSection = attachmentUrls.length > 0 
-        ? `🖼️ **Evidence Links:**\n${attachmentUrls.map((url, i) => `${i+1}. ${url}`).join('\n')}\n\n` 
+      const mediaLinksSection = attachmentUrls.length > 0 
+        ? `📎 **Media Links:**\n${attachmentUrls.map((url, i) => `${i+1}. ${url}`).join('\n')}\n\n` 
         : '';
         
-      const commentText = `${imageLinksSection}${analysis.markdown}\n\n🚨 *แจ้งบัคโดย AI Sidekick*`;
+      const commentText = `${mediaLinksSection}${analysis.markdown}\n\n🚨 *แจ้งบัคโดย AI Sidekick*`;
       
       await clickUpService.addTaskComment(config.apiToken, taskId, commentText);
       
       setBugDescription('');
-      setBugImages([]);
+      setBugMedia([]);
       setReportMode(false);
       fetchDetails();
     } catch (err) {
@@ -382,14 +460,35 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
     lines.forEach((line, index) => {
       const imgMatch = line.match(/!\[.*?\]\((.*?)\)/);
       const rawUrlMatch = line.match(/(https?:\/\/[\w\d.-]+\.clickup-attachments\.com\/[\w\d\/\.-]+(?:\?[\w\d=&%-]*)?)/i);
-      const imageUrl = imgMatch ? imgMatch[1] : (rawUrlMatch ? rawUrlMatch[0] : null);
+      const attachmentUrl = imgMatch ? imgMatch[1] : (rawUrlMatch ? rawUrlMatch[0] : null);
 
-      if (imageUrl) {
-        elements.push(
-          <div key={`img-${index}`} className="my-4 rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-lg max-w-full inline-block group relative">
-            <img src={imageUrl} alt="Attachment" className="max-h-96 w-auto object-contain cursor-zoom-in" onClick={() => window.open(imageUrl, '_blank')} />
-          </div>
-        );
+      if (attachmentUrl) {
+        const isVideo = attachmentUrl.match(/\.(mp4|mov|webm|ogg|wmv|avi)($|\?)/i);
+        
+        if (isVideo) {
+          elements.push(
+            <div key={`video-${index}`} className="my-4 rounded-2xl overflow-hidden border border-gray-200 bg-slate-900 shadow-lg max-w-full block">
+              <video 
+                src={attachmentUrl} 
+                controls 
+                className="max-h-96 w-full object-contain"
+                poster="https://picsum.photos/seed/video/800/450?blur=10"
+              />
+            </div>
+          );
+        } else {
+          elements.push(
+            <div key={`img-${index}`} className="my-4 rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-lg max-w-full inline-block group relative">
+              <img 
+                src={attachmentUrl} 
+                alt="Attachment" 
+                className="max-h-96 w-auto object-contain cursor-zoom-in" 
+                onClick={() => window.open(attachmentUrl, '_blank')} 
+                referrerPolicy="no-referrer"
+              />
+            </div>
+          );
+        }
         if (rawUrlMatch && line.trim() === rawUrlMatch[0]) return;
       }
 
@@ -703,21 +802,30 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
                   <h4 className="font-black text-red-700 text-sm mb-4 uppercase">👾 AI Bug Reporter</h4>
                   <div className="space-y-4">
                     <div className="flex flex-wrap gap-3 mb-4">
-                      {bugImages.map((img, idx) => (
-                        <div key={idx} className="w-20 h-20 rounded-xl border-2 border-red-200 relative overflow-hidden group">
-                          <img src={img} className="w-full h-full object-cover" />
-                          <button onClick={() => removeBugImage(idx)} className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded opacity-0 group-hover:opacity-100 transition">×</button>
+                      {bugMedia.map((m, idx) => (
+                        <div key={idx} className="w-24 h-24 rounded-xl border-2 border-red-200 relative overflow-hidden group">
+                           {m.type.startsWith('video/') ? (
+                             <div className="w-full h-full bg-slate-900 flex items-center justify-center">
+                                <span className="text-2xl">🎬</span>
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                                   <span className="text-[10px] font-bold text-white px-2 py-1 bg-red-600 rounded">VIDEO</span>
+                                </div>
+                             </div>
+                           ) : (
+                             <img src={m.data} className="w-full h-full object-cover" />
+                           )}
+                           <button onClick={() => removeBugMedia(idx)} className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded-lg opacity-0 group-hover:opacity-100 transition z-10">×</button>
                         </div>
                       ))}
-                      <div onClick={() => fileInputRef.current?.click()} className="w-20 h-20 border-2 border-dashed border-red-300 rounded-xl flex flex-col items-center justify-center cursor-pointer bg-white hover:bg-red-50 transition">
-                         <span className="text-[20px]">＋</span>
-                         <span className="text-[9px] font-bold text-red-400">รูป</span>
+                      <div onClick={() => fileInputRef.current?.click()} className="w-24 h-24 border-2 border-dashed border-red-300 rounded-xl flex flex-col items-center justify-center cursor-pointer bg-white hover:bg-red-50 transition">
+                         <span className="text-[24px] mb-1">＋</span>
+                         <span className="text-[10px] font-bold text-red-500 uppercase">สื่อ (รูป/วิดีโอ)</span>
                       </div>
                     </div>
-                    <textarea value={bugDescription} onChange={(e) => setBugDescription(e.target.value)} placeholder="เล่าอาการบัคสั้นๆ..." className="w-full bg-white border-2 border-red-100 rounded-xl p-4 text-sm font-bold focus:border-red-400 outline-none min-h-[100px]" />
-                    <input ref={fileInputRef} type="file" className="hidden" accept="image/*" multiple onChange={handleImageUpload} />
-                    <button onClick={submitBugReport} disabled={reporting || (!bugDescription && bugImages.length === 0)} className="w-full bg-red-600 text-white py-3 rounded-xl font-black shadow-lg disabled:opacity-50">
-                      {reporting ? 'กำลังวิเคราะห์และส่ง...' : '🚀 ส่งรายงานบัค'}
+                    <textarea value={bugDescription} onChange={(e) => setBugDescription(e.target.value)} placeholder="เล่าอาการบัคสั้นๆ หรือขั้นตอนที่พบปัญหา..." className="w-full bg-white border-2 border-red-100 rounded-xl p-4 text-sm font-bold focus:border-red-400 outline-none min-h-[120px]" />
+                    <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*" multiple onChange={handleImageUpload} />
+                    <button onClick={submitBugReport} disabled={reporting || (!bugDescription && bugMedia.length === 0)} className="w-full bg-gradient-to-r from-red-600 to-rose-700 text-white py-4 rounded-xl font-black shadow-lg hover:from-red-700 hover:to-rose-800 disabled:opacity-50 transition active:scale-95">
+                      {reporting ? 'กำลังวิเคราะห์บัคด้วย AI...' : '🚀 วิเคราะห์และส่งรายงานบัค'}
                     </button>
                   </div>
                 </div>
@@ -829,15 +937,147 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
           {/* Sidebar */}
           <div className="w-full lg:w-80 space-y-6 flex-shrink-0">
             <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-              <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest border-b pb-2">ผู้รับผิดชอบ</h4>
-              <div className="space-y-2">
-                {task.assignees?.map(u => (
-                  <div key={u.id} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-100 shadow-sm">
-                    <div className="w-6 h-6 rounded flex items-center justify-center text-[8px] font-black text-white" style={{ backgroundColor: u.color }}>{u.initials}</div>
-                    <span className="text-xs font-black">{u.username}</span>
-                  </div>
-                ))}
+              <div className="flex justify-between items-center border-b pb-2">
+                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">ผู้รับผิดชอบ</h4>
+                <div className="flex items-center gap-2">
+                  {!isEditingAssignees && <span className="text-[8px] font-bold text-gray-300 uppercase">Ctrl+E</span>}
+                  <button 
+                    onClick={() => {
+                      if (isEditingAssignees) {
+                        setIsEditingAssignees(false);
+                      } else {
+                        setIsEditingAssignees(true);
+                        setTempMainAssignees(task.assignees?.map(a => a.id) || []);
+                      }
+                    }}
+                    className="text-[9px] font-black text-indigo-600 hover:text-indigo-800 transition uppercase"
+                  >
+                    {isEditingAssignees ? 'ยกเลิก' : 'แก้ไข'}
+                  </button>
+                </div>
               </div>
+
+              {isEditingAssignees ? (
+                <div className="space-y-3">
+                  {/* Selected Chips */}
+                  {tempMainAssignees.length > 0 && (
+                    <div className="flex flex-wrap gap-1 p-2 bg-indigo-50/50 rounded-xl border border-indigo-100/50 min-h-[40px]">
+                      {tempMainAssignees.map(id => {
+                        const member = listMembers.find(m => (m.id || m.user?.id) === id);
+                        const userData = member?.user || member;
+                        if (!userData) return null;
+                        return (
+                          <div key={id} className="flex items-center gap-1 bg-white border border-indigo-200 pl-1 pr-1.5 py-0.5 rounded-md shadow-sm animate-in zoom-in duration-200">
+                             <div className="w-4 h-4 rounded flex items-center justify-center text-[6px] font-black text-white" style={{ backgroundColor: userData.color || '#ccc' }}>
+                               {userData.initials}
+                             </div>
+                             <span className="text-[9px] font-bold text-indigo-700">{userData.username}</span>
+                             <button onClick={() => toggleMainAssignee(id)} className="ml-1 text-indigo-300 hover:text-red-500 transition">×</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <div className="relative flex-1 group">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-indigo-500 transition-colors">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                      </div>
+                      <input 
+                        type="text" 
+                        placeholder="ค้นหาและเลือกสมาชิก..." 
+                        value={memberSearch}
+                        onChange={(e) => setMemberSearch(e.target.value)}
+                        className="w-full bg-white border border-gray-200 rounded-xl pl-9 pr-8 py-2 text-[11px] font-bold outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all"
+                      />
+                      {memberSearch && (
+                        <button onClick={() => setMemberSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                      )}
+                    </div>
+                    {currentUser && (
+                      <button 
+                        onClick={assignToMe}
+                        className="px-3 py-2 bg-white text-indigo-600 border border-gray-200 rounded-xl text-[10px] font-black hover:bg-indigo-50 hover:border-indigo-200 transition-all active:scale-95 shadow-sm"
+                        title="มอบหมายให้ฉัน"
+                      >
+                        ฉันเอง
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1 custom-scrollbar bg-white p-2 rounded-xl border border-gray-100 shadow-inner">
+                    <div className="text-[9px] font-black text-gray-300 uppercase tracking-widest mb-1 px-1">ผลการค้นหา</div>
+                    {filteredMembers.length > 0 ? filteredMembers.map(m => {
+                      const userId = m.id || m.user?.id;
+                      const userData = m.user || m;
+                      const isSelected = tempMainAssignees.includes(userId);
+                      return (
+                        <button 
+                          key={userId} 
+                          onClick={() => toggleMainAssignee(userId)}
+                          className={`w-full flex items-center justify-between p-2 rounded-lg border transition-all ${isSelected ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-transparent border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-100'}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[9px] font-black text-white shadow-sm" style={{ backgroundColor: userData.color || '#ccc' }}>
+                               {userData.profilePicture ? <img src={userData.profilePicture} className="w-full h-full rounded-lg object-cover" referrerPolicy="no-referrer" /> : userData.initials}
+                            </div>
+                            <div className="text-left">
+                              <p className="text-[10px] font-bold leading-none mb-0.5">{userData.username}</p>
+                              <p className="text-[8px] text-gray-400 font-medium">{userData.email || 'ClickUp Member'}</p>
+                            </div>
+                          </div>
+                          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white scale-110' : 'bg-white border-gray-200'}`}>
+                             {isSelected && <span className="text-[8px]">✓</span>}
+                          </div>
+                        </button>
+                      );
+                    }) : (
+                      <div className="text-center py-6">
+                        <span className="text-2xl mb-2 block">🔍</span>
+                        <p className="text-[10px] font-bold text-gray-400">ไม่พบสมาชิกทีมที่คุณค้นหา</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2">
+                    <button 
+                      onClick={handleSaveMainAssignees}
+                      disabled={isSavingAssignees}
+                      className={`w-full py-3 rounded-2xl text-[11px] font-black shadow-xl transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center gap-3 ${
+                        isSavingAssignees 
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                          : 'bg-indigo-700 hover:bg-indigo-800 text-white shadow-indigo-100 hover:-translate-y-1'
+                      }`}
+                    >
+                      {isSavingAssignees ? (
+                        <>
+                          <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-500 rounded-full animate-spin"></div>
+                          <span>กำลังบันทึกข้อมูล...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>บันทึกความเปลี่ยนแปลง</span>
+                          <span className="bg-black/20 px-2 py-0.5 rounded text-[9px] font-medium border border-white/10 uppercase tracking-tighter">Ctrl + S</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {task.assignees && task.assignees.length > 0 ? task.assignees.map(u => (
+                    <div key={u.id} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-100 shadow-sm animate-in fade-in duration-300">
+                      <div className="w-6 h-6 rounded flex items-center justify-center text-[8px] font-black text-white" style={{ backgroundColor: u.color }}>{u.initials}</div>
+                      <span className="text-xs font-black">{u.username}</span>
+                    </div>
+                  )) : (
+                    <p className="text-[10px] font-bold text-gray-400 italic text-center py-2">ยังไม่มีผู้รับผิดชอบ</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="bg-indigo-50/30 p-5 rounded-2xl border border-indigo-100 space-y-5">
@@ -912,8 +1152,9 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
         <div className="p-6 border-t bg-gray-50 sticky bottom-0 z-10">
           <div className="flex gap-3">
             <textarea value={quickComment} onChange={(e) => setQuickComment(e.target.value)} placeholder="พิมพ์โต้ตอบ..." className="flex-1 bg-white border-2 border-gray-200 rounded-2xl p-4 text-sm font-bold focus:border-indigo-600 outline-none h-20 transition" />
-            <button onClick={handleQuickComment} disabled={sendingQuickComment || !quickComment.trim()} className="bg-indigo-700 text-white px-8 rounded-2xl font-black text-sm hover:bg-indigo-800 disabled:opacity-50 transition active:scale-95">
-              {sendingQuickComment ? "..." : "ส่ง"}
+            <button onClick={handleQuickComment} disabled={sendingQuickComment || !quickComment.trim()} className="bg-indigo-700 text-white px-8 rounded-2xl font-black text-sm hover:bg-indigo-800 disabled:opacity-50 transition active:scale-95 flex flex-col items-center justify-center gap-1 group">
+              <span>{sendingQuickComment ? "..." : "ส่ง"}</span>
+              {!sendingQuickComment && <span className="text-[8px] opacity-50 group-hover:opacity-80 transition font-medium">Ctrl + Enter</span>}
             </button>
           </div>
         </div>

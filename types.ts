@@ -115,11 +115,7 @@ export interface SystemAnalysis {
   }[];
   acceptanceCriteria: AcceptanceCriterion[];
   definitionOfDone: string[];
-  keynoteSlides: {
-    title: string;
-    content: string[];
-  }[];
-  followUpQuestions: string[];
+  refinedPurpose?: string;
 }
 
 export interface BugReportResult {

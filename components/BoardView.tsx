@@ -180,6 +180,23 @@ const BoardView: React.FC<Props> = ({ config, refreshTrigger }) => {
   const [taskStats, setTaskStats] = useState<Record<string, TaskStats>>({});
   const [localRefresh, setLocalRefresh] = useState(0);
   const [activeTask, setActiveTask] = useState<ClickUpTask | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+      if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -387,17 +404,51 @@ const BoardView: React.FC<Props> = ({ config, refreshTrigger }) => {
 
   if (error) return <div className="p-4 bg-red-50 text-red-700 rounded-xl font-bold border border-red-200">{error}</div>;
 
+  const filteredTasks = tasks.filter(t => 
+    t.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    t.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    t.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCorners}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-    >
-      <div className="flex gap-6 overflow-x-auto pb-8 scrollbar-hide min-h-[60vh]">
-        {statuses.map((status) => {
-          const statusTasks = tasks.filter(t => t.status.status.toLowerCase() === status.status.toLowerCase());
+    <div className="h-full flex flex-col">
+      <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-sm">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          <input 
+            ref={searchInputRef}
+            type="text" 
+            placeholder="ค้นหางาน (Press / หรือ Ctrl+K)..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-10 pr-4 py-2 text-sm font-bold outline-none focus:bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all font-sans"
+          />
+          {searchQuery && (
+            <button 
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+           <span className="text-[10px] font-black text-gray-400 uppercase">Filters:</span>
+           <button className="px-3 py-1 bg-gray-50 border border-gray-100 rounded-lg text-[10px] font-black text-gray-500 hover:bg-gray-100 transition">ALL</button>
+           <button className="px-3 py-1 bg-white border border-gray-100 rounded-lg text-[10px] font-black text-gray-300 transition cursor-not-allowed">MY TASKS</button>
+        </div>
+      </div>
+
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCorners}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex gap-6 overflow-x-auto p-6 pb-8 scrollbar-hide flex-1">
+          {statuses.map((status) => {
+            const statusTasks = filteredTasks.filter(t => t.status.status.toLowerCase() === status.status.toLowerCase());
           return (
             <div key={status.status} className="flex-shrink-0 w-80 flex flex-col gap-4">
               <div className="flex items-center justify-between px-2">
@@ -458,7 +509,8 @@ const BoardView: React.FC<Props> = ({ config, refreshTrigger }) => {
         ) : null}
       </DragOverlay>
     </DndContext>
-  );
+  </div>
+);
 };
 
 export default BoardView;

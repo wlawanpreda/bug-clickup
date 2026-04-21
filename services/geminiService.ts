@@ -5,14 +5,14 @@ import { SystemAnalysis, BugReportResult } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const geminiService = {
-  generateBugReport: async (description: string, imageBase64?: string, history?: any[]): Promise<BugReportResult> => {
+  generateBugReport: async (description: string, mediaFiles?: { data: string, mimeType: string }[], history?: any[]): Promise<BugReportResult> => {
     const historyContext = history && history.length > 0 
       ? `\n\n**ประวัติการพูดคุยที่เกี่ยวข้อง:**\n${history.map(h => `${h.user.username}: ${h.comment_text}`).join('\n---\n')}`
       : '';
 
     const systemInstruction = `
       คุณคือ 'QA Sidekick' ผู้เชี่ยวชาญด้านการทดสอบซอฟต์แวร์
-      หน้าที่ของคุณคือเปลี่ยนข้อมูลดิบจาก Tester (รูปภาพและข้อความสั้นๆ) ให้กลายเป็น Bug Report ระดับมืออาชีพที่ Developer เข้าใจและแก้ไขได้ทันที
+      หน้าที่ของคุณคือเปลี่ยนข้อมูลดิบจาก Tester (รูปภาพ, วิดีโอ และข้อความสั้นๆ) ให้กลายเป็น Bug Report ระดับมืออาชีพที่ Developer เข้าใจและแก้ไขได้ทันที
       
       **บริบทเพิ่มเติม:** 
       คุณจะได้รับประวัติการพูดคุย (History) ของคอมเมนต์ที่เกี่ยวข้องด้วย หากมีการพูดคุยถึงวิธีแก้ปัญหา หรืออาการที่เคยเกิดขึ้นมาก่อน ให้นำมาวิเคราะห์ประกอบเพื่อให้รายงานละเอียดยิ่งขึ้น (เช่น ระบุว่าเคยพบอาการนี้มาก่อนไหม หรือเคยลองแก้ด้วยวิธีไหนแล้วไม่ได้ผล)
@@ -20,7 +20,7 @@ export const geminiService = {
       **ต้องตอบเป็นภาษาไทยเท่านั้น**
       โครงสร้างรายงานต้องประกอบด้วย:
       1. 🚨 **สรุปปัญหา (Summary):** หัวข้อสั้นๆ ที่บอกว่าเกิดอะไรขึ้น
-      2. 📱 **สภาพแวดล้อม (Environment):** เดาจากรูปหรือข้อมูล (เช่น iOS, Android, Desktop)
+      2. 📱 **สภาพแวดล้อม (Environment):** เดาจากสื่อหรือข้อมูล (เช่น iOS, Android, Desktop)
       3. 🛠 **ขั้นตอนการเกิดปัญหา (Steps to Reproduce):** ลำดับ 1, 2, 3...
       4. ❌ **ผลลัพธ์ที่พบ (Actual Result):** สิ่งที่เกิดขึ้นจริงในปัจจุบัน
       5. ✅ **ผลลัพธ์ที่ควรจะเป็น (Expected Result):** สิ่งที่ควรจะเกิดขึ้นถ้าไม่มีบัค
@@ -31,17 +31,20 @@ export const geminiService = {
     `;
 
     const contents: any[] = [{ text: `รายละเอียดจาก Tester: ${description}${historyContext}` }];
-    if (imageBase64) {
-      contents.push({
-        inlineData: {
-          mimeType: 'image/png',
-          data: imageBase64.split(',')[1] || imageBase64,
-        },
+    
+    if (mediaFiles && mediaFiles.length > 0) {
+      mediaFiles.forEach(file => {
+        contents.push({
+          inlineData: {
+            mimeType: file.mimeType,
+            data: file.data.includes(',') ? file.data.split(',')[1] : file.data,
+          },
+        });
       });
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-1.5-pro',
       contents: { parts: contents },
       config: {
         systemInstruction,
@@ -65,7 +68,7 @@ export const geminiService = {
     }
   },
 
-  analyzeSystem: async (prompt: string, imagesBase64?: string[]): Promise<SystemAnalysis> => {
+  analyzeSystem: async (prompt: string, purpose?: string, imagesBase64?: string[]): Promise<SystemAnalysis> => {
     const systemInstruction = `
       คุณคือ 'PM's Sidekick' เป็นผู้ช่วย AI ระดับผู้เชี่ยวชาญสำหรับ Project Manager ของทีมพัฒนาซอฟต์แวร์โดยเฉพาะ
 
@@ -80,7 +83,8 @@ export const geminiService = {
          - วิเคราะห์ความเร่งด่วน ('priorityLabel') และ Story Points ('storyPoints')
          - แตกรายการงานแยกตามหมวดหมู่เทคนิค (UI/UX, Backend, Logic) ให้กระชับ เข้าใจง่าย
       3. ** Acceptance Criteria & DoD:** สร้างเงื่อนไขการยอมรับ (GIVEN/WHEN/THEN) และรายการตรวจสอบมาตรฐาน (DoD) เป็นภาษาไทยที่ชัดเจน
-      4. **ลดเนื้อหาส่วนเกิน:** ไม่ต้องอธิบายยืดเยื้อ เน้นข้อมูลที่ Developer นำไปใช้งานได้ทันที
+      4. **ขัดเกลาวัตถุประสงค์ (Refine Purpose):** นำข้อมูล 'purpose' จากผู้ใช้มาสรุปและขัดเกลาให้ดูเป็นมืออาชีพ ( Professional Tone) ใส่ในฟิลด์ 'refinedPurpose'
+      5. **ลดเนื้อหาส่วนเกิน:** ไม่ต้องอธิบายยืดเยื้อ เน้นข้อมูลที่ Developer นำไปใช้งานได้ทันที
 
       **การส่งออกข้อมูล (Output Schema):**
       จงนำการวิเคราะห์ของคุณมาใส่ในรูปแบบ JSON ดังนี้:
@@ -94,11 +98,17 @@ export const geminiService = {
       - 'categories': รายการวิเคราะห์แยกตามหมวดหมู่ (ชื่อหมวดและรายละเอียดเป็นภาษาไทย)
       - 'acceptanceCriteria': อาร์เรย์ของวัตถุที่มี 'given', 'when', 'then' เป็นภาษาไทย
       - 'definitionOfDone': อาร์เรย์ของสตริง (ภาษาไทย)
-      - 'keynoteSlides': โครงร่างเนื้อหาสำหรับนำเสนอ (เป็นภาษาไทย)
-      - 'followUpQuestions': คำถามเพิ่มเติม (เป็นภาษาไทย)
+      - 'refinedPurpose': วัตถุประสงค์ที่ขัดเกลาแล้ว (ภาษาไทย)
     `;
 
-    const parts: any[] = [{ text: prompt }];
+    const fullPrompt = `
+      วัตถุประสงค์ของผู้ใช้: ${purpose || 'ไม่ได้ระบุ'}
+      
+      โจทย์/รายละเอียด:
+      ${prompt}
+    `;
+
+    const parts: any[] = [{ text: fullPrompt }];
     
     if (imagesBase64 && imagesBase64.length > 0) {
       imagesBase64.forEach(img => {
@@ -154,23 +164,9 @@ export const geminiService = {
               },
             },
             definitionOfDone: { type: Type.ARRAY, items: { type: Type.STRING } },
-            keynoteSlides: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  content: { type: Type.ARRAY, items: { type: Type.STRING } },
-                },
-                required: ['title', 'content'],
-              },
-            },
-            followUpQuestions: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-            },
+            refinedPurpose: { type: Type.STRING },
           },
-          required: ['topic', 'system', 'feature', 'priorityLabel', 'priorityLevel', 'storyPoints', 'suggestedTags', 'categories', 'acceptanceCriteria', 'definitionOfDone', 'keynoteSlides', 'followUpQuestions'],
+          required: ['topic', 'system', 'feature', 'priorityLabel', 'priorityLevel', 'storyPoints', 'suggestedTags', 'categories', 'acceptanceCriteria', 'definitionOfDone', 'refinedPurpose'],
         },
       },
     });

@@ -15,7 +15,6 @@ const App: React.FC = () => {
   const [isEditingConfig, setIsEditingConfig] = useState(false);
   const [analysis, setAnalysis] = useState<SystemAnalysis | null>(null);
   const [prompt, setPrompt] = useState('');
-  const [notifyRoom, setNotifyRoom] = useState('');
   const [purpose, setPurpose] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -90,18 +89,12 @@ const App: React.FC = () => {
   };
 
   const runAnalysis = async (customPrompt?: string) => {
-    const finalPrompt = customPrompt || `
-วัตถุประสงค์ (เพื่อ): ${purpose}
-ห้องที่ต้องแจ้ง (เเจ้งห้อง): ${notifyRoom}
-รายละเอียด/โจทย์: ${prompt}
-    `.trim();
-    
     if (!prompt && images.length === 0 && !purpose) return;
 
     setLoading(true);
     setError(null);
     try {
-      const result = await geminiService.analyzeSystem(finalPrompt, images.length > 0 ? images : undefined);
+      const result = await geminiService.analyzeSystem(customPrompt || prompt, purpose, images.length > 0 ? images : undefined);
       setAnalysis(result);
       setViewMode('analysis');
     } catch (err) {
@@ -120,7 +113,6 @@ const App: React.FC = () => {
   const handleReset = () => {
     setAnalysis(null);
     setPrompt('');
-    setNotifyRoom('');
     setPurpose('');
     setImages([]);
     setViewMode('board');
@@ -130,6 +122,29 @@ const App: React.FC = () => {
     setBoardRefreshKey(prev => prev + 1);
     handleReset();
   };
+
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      // Switch to Board View: Alt + B
+      if (e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setViewMode('board');
+      }
+      // Switch to AI Sidekick: Alt + N
+      if (e.altKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        setViewMode('analysis');
+      }
+      // Toggle/Close Settings: Esc
+      if (e.key === 'Escape') {
+        if (isEditingConfig) {
+          setIsEditingConfig(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
+  }, [isEditingConfig]);
 
   const handleLogout = async () => {
     if (window.confirm("คุณต้องการออกจากระบบใช่หรือไม่?")) {
@@ -394,7 +409,7 @@ const App: React.FC = () => {
                   {/* Right Column: Detailed Context */}
                   <div className="lg:col-span-2 space-y-6">
                     <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-gray-100/50 flex flex-col h-full">
-                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                       <div className="grid grid-cols-1 gap-6 mb-8">
                           <div className="space-y-2">
                              <label className="flex items-center gap-2 text-[11px] font-black text-indigo-600 uppercase tracking-[0.15em]">
                                 <span className="w-5 h-5 bg-indigo-700 text-white rounded-md flex items-center justify-center text-[9px]">2</span>
@@ -405,19 +420,6 @@ const App: React.FC = () => {
                                 value={purpose}
                                 onChange={(e) => setPurpose(e.target.value)}
                                 placeholder="เช่น เพื่อเสนอผู้บริหาร, เพื่อสรุปความคืบหน้า..."
-                                className="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl p-4 text-sm font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-700 outline-none transition-all placeholder-gray-300 shadow-sm"
-                             />
-                          </div>
-                          <div className="space-y-2">
-                             <label className="flex items-center gap-2 text-[11px] font-black text-indigo-600 uppercase tracking-[0.15em]">
-                                <span className="w-5 h-5 bg-indigo-700 text-white rounded-md flex items-center justify-center text-[9px]">3</span>
-                                เเจ้งห้อง
-                             </label>
-                             <input 
-                                type="text"
-                                value={notifyRoom}
-                                onChange={(e) => setNotifyRoom(e.target.value)}
-                                placeholder="เลือกห้องที่จะส่งการแจ้งเตือน..."
                                 className="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl p-4 text-sm font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-700 outline-none transition-all placeholder-gray-300 shadow-sm"
                              />
                           </div>
@@ -495,7 +497,6 @@ const App: React.FC = () => {
                 config={config} 
                 images={images}
                 purpose={purpose}
-                notifyRoom={notifyRoom}
                 onQuestionAnswered={handleQuestionAnswered}
                 onReset={handleReset}
                 onTaskCreated={handleTaskCreated}
@@ -504,6 +505,15 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      <footer className="bg-gray-100 border-t py-2 px-6">
+        <div className="max-w-[1600px] mx-auto flex flex-wrap justify-center gap-6 text-[9px] font-black text-gray-400 uppercase tracking-widest">
+          <div className="flex items-center gap-1.5"><span className="bg-white border rounded px-1.5 py-0.5 text-gray-600 shadow-sm">Alt + B</span> Board View</div>
+          <div className="flex items-center gap-1.5"><span className="bg-white border rounded px-1.5 py-0.5 text-gray-600 shadow-sm">Alt + N</span> AI Analysis</div>
+          <div className="flex items-center gap-1.5"><span className="bg-white border rounded px-1.5 py-0.5 text-gray-600 shadow-sm">/</span> or <span className="bg-white border rounded px-1.5 py-0.5 text-gray-600 shadow-sm">Ctrl + K</span> Search</div>
+          <div className="flex items-center gap-1.5"><span className="bg-white border rounded px-1.5 py-0.5 text-gray-600 shadow-sm">Esc</span> Close Modal</div>
+        </div>
+      </footer>
     </div>
   );
 };
