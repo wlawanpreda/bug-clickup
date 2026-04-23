@@ -2,7 +2,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SystemAnalysis, BugReportResult } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || "" });
 
 export const geminiService = {
   generateBugReport: async (description: string, mediaFiles?: { data: string, mimeType: string }[], history?: any[]): Promise<BugReportResult> => {
@@ -44,7 +44,7 @@ export const geminiService = {
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-pro',
+      model: 'gemini-1.5-flash',
       contents: { parts: contents },
       config: {
         systemInstruction,
@@ -61,10 +61,13 @@ export const geminiService = {
     });
 
     try {
-      return JSON.parse(response.text);
+      const responseText = typeof response.text === 'string' ? response.text : JSON.stringify(response.text);
+      // Clean up potential markdown blocks if AI ignored responseMimeType (rare but happens)
+      const cleaned = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+      return JSON.parse(cleaned);
     } catch (err) {
       console.error("Failed to parse Gemini bug report response:", response.text);
-      throw new Error("รูปแบบการตอบกลับจาก AI ไม่ถูกต้อง");
+      throw new Error(`รูปแบบการตอบกลับจาก AI ไม่ถูกต้อง: ${err instanceof Error ? err.message : 'Unknown'}`);
     }
   },
 
@@ -122,7 +125,7 @@ export const geminiService = {
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-1.5-pro',
       contents: { parts },
       config: {
         systemInstruction,
@@ -172,10 +175,12 @@ export const geminiService = {
     });
 
     try {
-      return JSON.parse(response.text);
+      const responseText = typeof response.text === 'string' ? response.text : JSON.stringify(response.text);
+      const cleaned = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+      return JSON.parse(cleaned);
     } catch (err) {
       console.error("Failed to parse Gemini response:", response.text);
-      throw new Error("รูปแบบการตอบกลับจาก AI ไม่ถูกต้อง");
+      throw new Error(`รูปแบบการตอบกลับจาก AI ไม่ถูกต้อง: ${err instanceof Error ? err.message : 'Unknown'}`);
     }
   },
 

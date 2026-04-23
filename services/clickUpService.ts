@@ -304,8 +304,11 @@ export const clickUpService = {
     }
     const blob = new Blob([array], { type: mimeType });
 
+    const extension = mimeType.split('/')[1] || 'png';
+    const filename = `bug-report-${Date.now()}.${extension}`;
+
     const formData = new FormData();
-    formData.append('attachment', blob, `Preview-Bug-Report-${Date.now()}.png`);
+    formData.append('attachment', blob, filename);
 
     const response = await fetchWithRetry(`${BASE_URL}/task/${taskId}/attachment`, {
       method: 'POST',

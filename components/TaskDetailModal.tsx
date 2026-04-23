@@ -378,8 +378,9 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
       setReportMode(false);
       fetchDetails();
     } catch (err) {
-      console.error(err);
-      alert('เกิดข้อผิดพลาดในการส่งรายงานบัค กรุณาลองใหม่อีกครั้ง');
+      console.error('Bug Report Error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดที่ไม่รู้จัก';
+      alert(`เกิดข้อผิดพลาดในการส่งรายงานบัค: ${errorMessage}\nกรุณาลองใหม่อีกครั้ง`);
     } finally {
       setReporting(false);
     }
