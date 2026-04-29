@@ -18,6 +18,7 @@ const App: React.FC = () => {
   const [purpose, setPurpose] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isImprovingPrompt, setIsImprovingPrompt] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [boardRefreshKey, setBoardRefreshKey] = useState(0);
   const [viewMode, setViewMode] = useState<'board' | 'analysis'>('board');
@@ -102,6 +103,21 @@ const App: React.FC = () => {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleImprovePrompt = async () => {
+    if (!prompt.trim()) return;
+    setIsImprovingPrompt(true);
+    setError(null);
+    try {
+      const improved = await geminiService.improvePrompt(prompt, purpose);
+      setPrompt(improved);
+    } catch (err) {
+      console.error(err);
+      setError('ไม่สามารถปรับปรุงคำพูดได้ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsImprovingPrompt(false);
     }
   };
 
@@ -430,12 +446,27 @@ const App: React.FC = () => {
                              <span className="w-5 h-5 bg-indigo-700 text-white rounded-md flex items-center justify-center text-[9px]">4</span>
                              ระบุรายละเอียด/โจทย์
                           </label>
-                          <textarea
-                            value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
-                            placeholder="เช่น 'สรุปงานจากภาพถ่ายแชทนี้และแตกเป็น Task ย่อยให้หน่อย โดยอ้างอิงจากประวัติการคุย'..."
-                            className="flex-1 min-h-[250px] w-full bg-gray-50 border-2 border-gray-100 rounded-[1.5rem] p-5 text-base font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-700 outline-none transition-all placeholder-gray-300 shadow-sm resize-none"
-                          />
+                          <div className="relative flex-1 flex flex-col group">
+                            <textarea
+                              value={prompt}
+                              onChange={(e) => setPrompt(e.target.value)}
+                              placeholder="เช่น 'สรุปงานจากภาพถ่ายแชทนี้และแตกเป็น Task ย่อยให้หน่อย โดยอ้างอิงจากประวัติการคุย'..."
+                              className="flex-1 min-h-[250px] w-full bg-gray-50 border-2 border-gray-100 rounded-[1.5rem] p-5 text-base font-bold text-gray-900 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-700 outline-none transition-all placeholder-gray-300 shadow-sm resize-none"
+                            />
+                            {prompt.trim() && (
+                              <button 
+                                onClick={handleImprovePrompt}
+                                disabled={isImprovingPrompt || loading}
+                                className="absolute bottom-4 right-4 bg-white border border-indigo-100 hover:border-indigo-600 hover:bg-indigo-600 text-indigo-700 hover:text-white px-4 py-2 rounded-2xl shadow-lg transition-all duration-300 flex items-center gap-2 group/btn z-10 disabled:opacity-50"
+                                title="ปรับปรุงคำด้วย AI"
+                              >
+                                <span className={`text-[10px] font-black uppercase tracking-widest overflow-hidden transition-all duration-500 whitespace-nowrap ${isImprovingPrompt ? 'max-w-[200px]' : 'max-w-0 group-hover/btn:max-w-[200px]'}`}>
+                                  {isImprovingPrompt ? 'กำลังปรับปรุง...' : 'ปรับปรุงคำ/Prompt'}
+                                </span>
+                                <span className={`${isImprovingPrompt ? 'animate-pulse' : 'group-hover/btn:rotate-12 transition-transform'}`}>✨</span>
+                              </button>
+                            )}
+                          </div>
                        </div>
 
                        {error && (

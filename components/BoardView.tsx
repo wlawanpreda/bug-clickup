@@ -83,12 +83,12 @@ const SortableTaskCard: React.FC<SortableTaskCardProps> = ({ task, stats, onClic
       {...attributes}
       {...listeners}
       onClick={() => onClick(task.id)}
-      className={`bg-white p-4 rounded-xl shadow-sm border transition cursor-grab active:cursor-grabbing group relative overflow-hidden ${
+      className={`bg-white p-4 rounded-xl shadow-sm border transition-all duration-200 cursor-grab active:cursor-grabbing group relative overflow-hidden hover:scale-[1.02] hover:shadow-lg ${
         hasIssues 
           ? 'border-red-400 ring-2 ring-red-50' 
           : isFullyPassed 
             ? 'border-emerald-500 ring-2 ring-emerald-50' 
-            : 'border-gray-200 hover:shadow-md'
+            : 'border-gray-200'
       }`}
     >
       {stats && !stats.loading && stats.total > 0 && (
@@ -101,7 +101,7 @@ const SortableTaskCard: React.FC<SortableTaskCardProps> = ({ task, stats, onClic
       )}
 
       <div className="flex justify-between items-start mb-2 mt-1">
-         <h4 className={`font-bold text-sm leading-tight transition ${hasIssues ? 'text-red-900' : isFullyPassed ? 'text-emerald-900' : 'text-gray-900 group-hover:text-indigo-700'}`}>{task.name}</h4>
+         <h4 className={`font-black text-base leading-tight transition ${hasIssues ? 'text-red-900' : isFullyPassed ? 'text-emerald-900' : 'text-gray-900 group-hover:text-indigo-700'}`}>{task.name}</h4>
          {task.priority && (
            <span className="text-[9px] font-black px-1.5 py-0.5 rounded uppercase flex-shrink-0 ml-2" style={{ backgroundColor: task.priority.color + '20', color: task.priority.color }}>
              {task.priority.priority}

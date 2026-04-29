@@ -295,30 +295,59 @@ export const clickUpService = {
   },
 
   uploadAttachment: async (token: string, taskId: string, base64Data: string) => {
-    const base64Parts = base64Data.split(',');
-    const mimeType = base64Parts[0].match(/:(.*?);/)?.[1] || 'image/png';
-    const binaryData = atob(base64Parts[1]);
-    const array = new Uint8Array(binaryData.length);
-    for (let i = 0; i < binaryData.length; i++) {
-      array[i] = binaryData.charCodeAt(i);
+    try {
+      // Robust way to convert base64 to Blob
+      let blob: Blob;
+      if (base64Data.startsWith('data:')) {
+        const res = await fetch(base64Data);
+        blob = await res.blob();
+      } else {
+        // Fallback for raw base64
+        const binaryData = atob(base64Data);
+        const array = new Uint8Array(binaryData.length);
+        for (let i = 0; i < binaryData.length; i++) {
+          array[i] = binaryData.charCodeAt(i);
+        }
+        blob = new Blob([array], { type: 'image/png' });
+      }
+      
+      const mimeType = blob.type || 'image/png';
+      let extension = mimeType.split('/')[1] || 'png';
+      if (extension === 'jpeg') extension = 'jpg';
+      if (extension.includes('+')) extension = extension.split('+')[0];
+      
+      const filename = `bug-report-${Date.now()}.${extension}`;
+
+      const formData = new FormData();
+      formData.append('attachment', blob, filename);
+
+      // Log for debugging (only in dev/preview)
+      console.log(`Uploading ${filename} (${blob.size} bytes) to task ${taskId}`);
+
+      const response = await fetchWithRetry(`${BASE_URL}/task/${taskId}/attachment`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const responseBody = await response.text();
+        let errorMsg = `Upload failed (${response.status})`;
+        try {
+          const errorData = JSON.parse(responseBody);
+          errorMsg = errorData.err || errorData.message || responseBody;
+        } catch (e) {
+          if (responseBody) errorMsg = responseBody;
+        }
+        console.error('ClickUp Upload Error Details:', response.status, errorMsg);
+        throw new Error(`ClickUp Error (${response.status}): ${errorMsg}`);
+      }
+      return response.json();
+    } catch (err) {
+      console.error('uploadAttachment final exception:', err);
+      throw err;
     }
-    const blob = new Blob([array], { type: mimeType });
-
-    const extension = mimeType.split('/')[1] || 'png';
-    const filename = `bug-report-${Date.now()}.${extension}`;
-
-    const formData = new FormData();
-    formData.append('attachment', blob, filename);
-
-    const response = await fetchWithRetry(`${BASE_URL}/task/${taskId}/attachment`, {
-      method: 'POST',
-      headers: {
-        Authorization: token,
-      },
-      body: formData,
-    });
-
-    if (!response.ok) throw new Error('Failed to upload attachment');
-    return response.json();
   }
 };

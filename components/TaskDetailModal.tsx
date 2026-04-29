@@ -38,6 +38,10 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [summaryText, setSummaryText] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [idePrompt, setIdePrompt] = useState('');
+  const [isGeneratingIDEPrompt, setIsGeneratingIDEPrompt] = useState(false);
+  const [copiedIDEPrompt, setCopiedIDEPrompt] = useState(false);
+  const [isImprovingDescription, setIsImprovingDescription] = useState(false);
   
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
   const [editSubtaskName, setEditSubtaskName] = useState('');
@@ -196,6 +200,48 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
       alert('ไม่สามารถสรุปข้อมูลได้');
     } finally {
       setIsSummarizing(false);
+    }
+  };
+
+  const handleGenerateIDEPrompt = async () => {
+    if (!task) return;
+    setIsGeneratingIDEPrompt(true);
+    try {
+      const prompt = await geminiService.generateIDEPrompt(
+        task.name,
+        task.description || task.markdown_description || '',
+        task.subtasks
+      );
+      setIdePrompt(prompt);
+    } catch (err) {
+      console.error(err);
+      alert('ไม่สามารถสร้าง IDE Prompt ได้');
+    } finally {
+      setIsGeneratingIDEPrompt(false);
+    }
+  };
+
+  const handleCopyIDEPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(idePrompt);
+      setCopiedIDEPrompt(true);
+      setTimeout(() => setCopiedIDEPrompt(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy IDE Prompt:', err);
+    }
+  };
+
+  const handleImproveDescription = async () => {
+    if (!bugDescription.trim()) return;
+    setIsImprovingDescription(true);
+    try {
+      const improved = await geminiService.improveBugDescription(bugDescription);
+      setBugDescription(improved);
+    } catch (err) {
+      console.error(err);
+      alert('ไม่สามารถปรับปรุงคำอธิบายได้');
+    } finally {
+      setIsImprovingDescription(false);
     }
   };
 
@@ -599,10 +645,49 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
 
             {/* Description */}
             <section>
-              <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Description รายละเอียด</h3>
-              <div className="bg-gray-50 p-6 rounded-2xl border border-dashed border-gray-300 min-h-[100px] text-sm text-gray-700 font-medium whitespace-pre-wrap">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Description รายละเอียด</h3>
+                <button 
+                  onClick={handleGenerateIDEPrompt}
+                  disabled={isGeneratingIDEPrompt}
+                  className="text-[10px] font-black bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition flex items-center gap-2 border border-indigo-100 shadow-sm"
+                >
+                  {isGeneratingIDEPrompt ? "⏳ กำลังสร้าง..." : "✨ AI IDE Prompt"}
+                </button>
+              </div>
+              <div className="bg-gray-50 p-6 rounded-2xl border border-dashed border-gray-300 min-h-[100px] text-sm text-gray-700 font-medium whitespace-pre-wrap relative">
                 {task.description || task.markdown_description || "ไม่มีรายละเอียดเพิ่มเติม"}
               </div>
+
+              {idePrompt && (
+                <div className="mt-4 bg-slate-900 rounded-2xl p-6 shadow-xl border border-slate-800 animate-in slide-in-from-top-4 duration-500 overflow-hidden relative">
+                  <div className="absolute top-0 right-0 p-4 opacity-10 text-4xl font-black text-white uppercase pointer-events-none">IDE PROMPT</div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-lg">⌨️</div>
+                      <h4 className="text-xs font-black text-emerald-400 uppercase">Recommended IDE Prompt</h4>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={handleCopyIDEPrompt}
+                        className={`text-[9px] font-black px-3 py-1.5 rounded-lg transition-all ${copiedIDEPrompt ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-gray-300 hover:bg-slate-700'}`}
+                      >
+                        {copiedIDEPrompt ? 'คัดลอกแล้ว!' : 'คัดลอกไปที่ IDE'}
+                      </button>
+                      <button onClick={() => setIdePrompt('')} className="p-1.5 text-gray-500 hover:text-white transition">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-[11px] font-mono text-emerald-50 leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar bg-slate-950/50 p-4 rounded-xl border border-slate-800/50">
+                    {idePrompt}
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Ready to use in Cursor, VS Code, or Windsurf</span>
+                  </div>
+                </div>
+              )}
             </section>
 
             {/* Subtasks */}
@@ -823,7 +908,27 @@ const TaskDetailModal: React.FC<Props> = ({ taskId, config, onClose }) => {
                          <span className="text-[10px] font-bold text-red-500 uppercase">สื่อ (รูป/วิดีโอ)</span>
                       </div>
                     </div>
-                    <textarea value={bugDescription} onChange={(e) => setBugDescription(e.target.value)} placeholder="เล่าอาการบัคสั้นๆ หรือขั้นตอนที่พบปัญหา..." className="w-full bg-white border-2 border-red-100 rounded-xl p-4 text-sm font-bold focus:border-red-400 outline-none min-h-[120px]" />
+                    <div className="relative">
+                      <textarea 
+                        value={bugDescription} 
+                        onChange={(e) => setBugDescription(e.target.value)} 
+                        placeholder="เล่าอาการบัคสั้นๆ หรือขั้นตอนที่พบปัญหา..." 
+                        className="w-full bg-white border-2 border-red-100 rounded-xl p-4 text-sm font-bold focus:border-red-400 outline-none min-h-[120px]" 
+                      />
+                      {bugDescription.trim() && (
+                        <button 
+                          onClick={handleImproveDescription}
+                          disabled={isImprovingDescription}
+                          className="absolute bottom-4 right-4 bg-red-50 hover:bg-red-600 text-red-600 hover:text-white p-2 rounded-xl transition-all shadow-sm flex items-center gap-2 group border border-red-100"
+                          title="ปรับปรุงคำด้วย AI"
+                        >
+                          <span className={`text-[9px] font-black uppercase overflow-hidden transition-all duration-300 ${isImprovingDescription ? 'max-w-[100px]' : 'max-w-0 group-hover:max-w-[100px]'}`}>
+                            {isImprovingDescription ? 'กำลังปรับปรุง...' : 'ปรับปรุงคำ'}
+                          </span>
+                          <span>✨</span>
+                        </button>
+                      )}
+                    </div>
                     <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*" multiple onChange={handleImageUpload} />
                     <button onClick={submitBugReport} disabled={reporting || (!bugDescription && bugMedia.length === 0)} className="w-full bg-gradient-to-r from-red-600 to-rose-700 text-white py-4 rounded-xl font-black shadow-lg hover:from-red-700 hover:to-rose-800 disabled:opacity-50 transition active:scale-95">
                       {reporting ? 'กำลังวิเคราะห์บัคด้วย AI...' : '🚀 วิเคราะห์และส่งรายงานบัค'}

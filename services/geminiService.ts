@@ -2,7 +2,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SystemAnalysis, BugReportResult } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || "" });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const geminiService = {
   generateBugReport: async (description: string, mediaFiles?: { data: string, mimeType: string }[], history?: any[]): Promise<BugReportResult> => {
@@ -44,7 +44,7 @@ export const geminiService = {
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: { parts: contents },
       config: {
         systemInstruction,
@@ -125,7 +125,7 @@ export const geminiService = {
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-pro',
+      model: 'gemini-3.1-pro-preview',
       contents: { parts },
       config: {
         systemInstruction,
@@ -200,7 +200,7 @@ export const geminiService = {
     
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: { parts: [{ text: `กรุณาสรุปประเด็นจากคอมเมนต์เหล่านี้:\n${context}` }] },
         config: { systemInstruction },
       });
@@ -208,6 +208,121 @@ export const geminiService = {
     } catch (error) {
       console.error("Summary error:", error);
       return "ไม่สามารถสรุปข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง";
+    }
+  },
+
+  improveBugDescription: async (description: string): Promise<string> => {
+    const systemInstruction = `
+      คุณคือ 'Prompt Optimizer' หน้าที่ของคุณคือรับคำอธิบายบัคหรือปัญหาจากผู้ใช้ 
+      แล้วปรับปรุงให้มีความชัดเจน มีโครงสร้าง และเป็นมืออาชีพมากขึ้น (Professional Bug Report)
+      
+      สิ่งที่ควรปรับปรุง:
+      1. ภาษา: ปรับให้เป็นทางการและชัดเจนขึ้น
+      2. โครงสร้าง: แบ่งเป็นส่วนๆ เช่น สิ่งที่เกิดขึ้น (Observed), สิ่งที่ควรจะเป็น (Expected), และขั้นตอนการพบ (Steps) ถ้าเป็นไปได้
+      3. รายละเอียด: ตัดคำฟุ่มเฟือยออกแต่รักษาใจความสำคัญ
+      
+      **เงื่อนไข:**
+      - ตอบกลับเฉพาะเนื้อหาคำอธิบายที่ปรับปรุงแล้วเท่านั้น ไม่ต้องมีคำเกริ่นนำ
+      - ใช้ภาษาไทยเป็นหลัก แต่ใช้คำศัพท์เทคนิคภาษาอังกฤษตามความเหมาะสม
+      - รักษาความกระชับ
+    `;
+
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: { parts: [{ text: `ช่วยปรับปรุงข้อความนี้ให้เป็นรายงานบัคที่สมบูรณ์ขึ้น: ${description}` }] },
+        config: { systemInstruction },
+      });
+      return response.text.trim();
+    } catch (error) {
+      console.error("Improve description error:", error);
+      throw new Error("ไม่สามารถปรับปรุงข้อความได้ในขณะนี้");
+    }
+  },
+
+  improvePrompt: async (prompt: string, purpose?: string): Promise<string> => {
+    const systemInstruction = `
+      คุณคือ 'PM's Prompt Optimizer' หน้าที่ของคุณคือรับ 'รายละเอียด/โจทย์' จาก PM 
+      แล้วปรับปรุงให้มีความชัดเจน มีโครงสร้าง และเป็นประโยชน์ต่อการนำไปวิเคราะห์ต่อให้มากที่สุด
+      
+      สิ่งที่ควรปรับปรุง:
+      1. ความชัดเจน: ปรับประโยคให้อ่านง่ายและตรงประเด็น
+      2. โครงสร้าง: หากรายละเอียดซับซ้อน ให้จัดกลุ่มหรือแบ่งเป็นหัวข้อ
+      3. บริบท (Context): หากมี 'วัตถุประสงค์' (Purpose) ให้เชื่อมโยงรายละเอียดเข้ากับความต้องการนั้นให้ลงตัว
+      
+      **เงื่อนไข:**
+      - ตอบกลับเฉพาะเนื้อหาที่ปรับปรุงแล้วเท่านั้น ไม่ต้องมีคำเกริ่นนำ
+      - ใช้ภาษาไทยเป็นหลัก
+      - รักษาความกระชับ แต่ครอบคลุมประเด็นสำคัญ
+    `;
+
+    const input = purpose 
+      ? `วัตถุประสงค์: ${purpose}\nรายละเอียดที่ต้องการให้ปรับปรุง: ${prompt}`
+      : `รายละเอียดที่ต้องการให้ปรับปรุง: ${prompt}`;
+
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: { parts: [{ text: input }] },
+        config: { systemInstruction },
+      });
+      return response.text.trim();
+    } catch (error) {
+      console.error("Improve prompt error:", error);
+      throw new Error("ไม่สามารถปรับปรุงข้อความได้ในขณะนี้");
+    }
+  },
+
+  generateIDEPrompt: async (taskName: string, description: string, subtasks?: any[]): Promise<string> => {
+    const subtasksContext = subtasks && subtasks.length > 0
+      ? `\n\nรายการงานย่อย:\n${subtasks.map((t: any) => `- ${t.name}${t.description ? `: ${t.description}` : ''}`).join('\n')}`
+      : '';
+
+    const systemInstruction = `
+      คุณคือ 'Dev Sidekick' ผู้เชี่ยวชาญด้านการเขียนโปรแกรมและการทำ Prompt Engineering
+      หน้าที่ของคุณคือสร้าง Prompt สำหรับใช้ใน AI-Powered IDE (เช่น Cursor, VS Code with Copilot/Gemini, Windsurf) เพื่อให้ AI ช่วยเขียนโค้ดตามรายละเอียดงานที่ได้รับ
+      
+      Prompt ที่คุณสร้างควรจะ:
+      1. มีโครงสร้างที่ชัดเจน (Context, Objective, Requirements, Technical Details)
+      2. ระบุสิ่งที่ต้องทำ (Objective) ให้ชัดเจนที่สุด
+      3. ระบุเงื่อนไขและ Acceptance Criteria (AC)
+      4. รูปแบบต้องนำไป 'Copy-Paste' ใส่ IDE ได้ทันที
+      
+      **โครงสร้างที่แนะนำ:**
+      ---
+      # Role & Context
+      [อธิบายบริบทสั้นๆ]
+      
+      # Objective
+      [เป้าหมายหลักของงาน]
+      
+      # Requirements & Acceptance Criteria
+      - [ข้อกำหนด]
+      
+      # Instructions
+      - [ลำดับขั้นตอนการทำ]
+      ---
+      
+      ต้องตอบเป็นภาษาไทยในส่วนอธิบายสั้นๆ เสมอ แต่ตัว 'IDE Prompt' หลักควรใช้ภาษาอังกฤษ (Technical English) เป็นหลักเพื่อให้ AI ใน IDE ประมวลผลได้แม่นยำที่สุด
+    `;
+
+    const promptText = `
+      ช่วยสร้าง IDE Prompt สำหรับงานนี้:
+      หัวข้องาน: ${taskName}
+      รายละเอียด: ${description}
+      ${subtasksContext}
+    `;
+
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: { parts: [{ text: promptText }] },
+        config: { systemInstruction },
+      });
+      return response.text;
+    } catch (error) {
+      console.error("IDE Prompt generation error:", error);
+      return "ไม่สามารถสร้าง IDE Prompt ได้ในขณะนี้";
     }
   }
 };
